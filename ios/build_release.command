@@ -13,8 +13,7 @@ mkdir -p "$BUILD_DIR"
 
 finish() { echo; echo "$1"; echo "Журнал: $LOG"; read -r -p "Нажмите Enter, чтобы закрыть…" _; exit "$2"; }
 login_hint() {
-  grep -q -E "session has expired|Unable to log in with account" "$LOG" && \
-    echo "Похоже, Xcode вышел из аккаунта: Xcode → Settings → Apple Accounts → войдите заново."
+  echo "Если ошибка про подпись или профиль: Xcode → Settings → Apple Accounts → проверьте вход в аккаунт команды."
 }
 
 command -v xcodegen >/dev/null || finish "❌ Нужен XcodeGen: brew install xcodegen" 1
@@ -39,8 +38,13 @@ IPA="$(ls "$BUILD_DIR"/export/*.ipa 2>/dev/null | head -1)"
 [ -n "$IPA" ] || { grep -E "error:" "$LOG" | sort -u | tail -15; login_hint; finish "❌ Не получилось подготовить сборку." 1; }
 mkdir -p "$BUILD_DIR/check" && ditto -x -k "$IPA" "$BUILD_DIR/check"
 APP="$(ls -d "$BUILD_DIR"/check/Payload/*.app | head -1)"
-PROF="$(security cms -D -i "$APP/embedded.mobileprovision" 2>/dev/null)"
-if echo "$PROF" | grep -q "<key>ProvisionedDevices</key>" || codesign -d --entitlements :- "$APP" 2>/dev/null | grep -A1 get-task-allow | grep -q true; then
+security cms -D -i "$APP/embedded.mobileprovision" > "$BUILD_DIR/check/profile.plist" 2>/dev/null
+codesign -d --entitlements :- "$APP" > "$BUILD_DIR/check/entitlements.plist" 2>/dev/null
+PROFILE_NAME="$(/usr/libexec/PlistBuddy -c "Print :Name" "$BUILD_DIR/check/profile.plist" 2>/dev/null)"
+DEVICES="$(/usr/libexec/PlistBuddy -c "Print :ProvisionedDevices" "$BUILD_DIR/check/profile.plist" 2>/dev/null)"
+DEBUG="$(/usr/libexec/PlistBuddy -c "Print :get-task-allow" "$BUILD_DIR/check/entitlements.plist" 2>/dev/null)"
+echo "   профиль: $PROFILE_NAME"
+if [ -n "$DEVICES" ] || [ "$DEBUG" = "true" ]; then
   login_hint
   finish "❌ Сборка подписана профилем разработчика, а не App Store — не загружаю." 1
 fi
