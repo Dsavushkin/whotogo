@@ -1,4 +1,5 @@
 """Events from the official Timepad API (https://dev.timepad.ru). Needs a free personal token."""
+import asyncio
 import html
 import re
 from datetime import datetime, timedelta, timezone
@@ -19,12 +20,13 @@ CATEGORY_WORDS = [
     ("theater", ("театр", "спектакл", "стендап", "stand up", "импров")),
     ("cinema", ("кино", "фильм")),
     ("sport", ("спорт", "бег", "йог", "танц", "фитнес")),
+    ("walk", ("экскурс", "прогулк", "путешеств")),
     ("art", ("искусств", "выставк", "культур", "хобби", "творч", "мастер-класс", "рисован", "керамик")),
     ("talk", ("лекци", "наука", "психолог", "язык", "образован", "встреча", "разговорн", "книг")),
 ]
 # Not for «компания на вечер».
 SKIP_WORDS = ("для детей", "детск", "бизнес", "ит и интернет", "вебинар", "онлайн", "конференц", "форум",
-              "курс ", "тренинг", "образование за рубежом", "хакатон")
+              "курс ", "тренинг", "образование за рубежом", "хакатон", "без гида", "гражданск", "выставк")
 
 
 def clean(text: Optional[str]) -> str:
@@ -75,20 +77,41 @@ def to_event(item: dict) -> Optional[dict]:
     if any(w in hay for w in SKIP_WORDS):
         return None
     age = str(item.get("age_limit") or "")
-    if age.isdigit() and int(age) < 12 and "0" != age:  # events marked for small children
+    if age.isdigit() and int(age) < 12:  # family and children's events
         return None
-    location = item.get("location") or {}
-    address = clean(location.get("address"))
+    ends = parse_time(item.get("ends_at"))
+    if ends and ends - starts > timedelta(hours=8):  # exhibitions and other all-day things
+        return None
+    if (item.get("registration_data") or {}).get("is_registration_open") is False:
+        return None
+    address = clean((item.get("location") or {}).get("address"))
     if not address:  # no venue: most likely an online event
         return None
     organization = item.get("organization") or {}
+    organizer = clean(organization.get("name"))
+    description = clean(item.get("description_short"))
+    if organizer:
+        description = (description + " " if description else "") + f"Организатор: {organizer}."
     return {
-        "source": NAME, "source_id": str(item.get("id")), "title": title[:200],
-        "description": clean(item.get("description_short"))[:2000],
-        "category": pick_category(names, title), "starts_at": starts, "ends_at": parse_time(item.get("ends_at")),
-        "place": clean(organization.get("name"))[:200], "address": address[:300],
+        "source": NAME, "source_id": str(item.get("id")), "title": title[:200], "description": description[:2000],
+        "category": pick_category(names, title), "starts_at": starts, "ends_at": ends,
+        "place": short(address), "address": address[:300],
         "price": price_text(item.get("registration_data")), "url": str(item.get("url") or "")[:500],
     }
+
+
+def short(address: str, limit: int = 48) -> str:
+    """A long «how to find us» text -> something that fits a card."""
+    text = re.sub(r"^(место встречи|адрес|сбор)\s*[:—-]\s*", "", address, flags=re.I)
+    text = re.split(r"[;(]| - | — |(?<=[а-яёa-z]{3})\.\s+(?=[А-ЯЁA-Z«])", text)[0].strip(" ,.")
+    parts, head = [p.strip() for p in text.split(",") if p.strip()], ""
+    for part in parts:
+        if head and len(head) + len(part) + 2 > limit:
+            break
+        head = f"{head}, {part}" if head else part
+    if len(head) > limit:
+        head = head[:limit].rsplit(" ", 1)[0].rstrip(" ,") + "…"
+    return head or address[:limit]
 
 
 async def fetch(token: str, city: str, days_ahead: int, client: Optional[httpx.AsyncClient] = None) -> list:
@@ -105,14 +128,20 @@ async def fetch(token: str, city: str, days_ahead: int, client: Optional[httpx.A
     client = client or httpx.AsyncClient(timeout=30)
     out: list = []
     try:
-        while params["skip"] < 3000:
+        seen = set()
+        while params["skip"] < 8000:
             response = await client.get(API, params=params, headers={"Authorization": f"Bearer {token}"})
             response.raise_for_status()
             values = response.json().get("values") or []
-            out.extend(e for e in map(to_event, values) if e)
+            for event in filter(None, map(to_event, values)):
+                key = (event["title"], event["starts_at"].date())  # repeated sessions of one day -> the first
+                if key not in seen:
+                    seen.add(key)
+                    out.append(event)
             if len(values) < params["limit"]:
                 break
             params["skip"] += params["limit"]
+            await asyncio.sleep(0.25)
     finally:
         if own:
             await client.aclose()

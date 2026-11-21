@@ -3,7 +3,7 @@ import tempfile
 
 _dir = tempfile.mkdtemp()
 os.environ.update(DEV="1", RUN_BOT="0", RUN_JOBS="0", BOT_TOKEN="", ADMIN_IDS="1",
-                  DATABASE_URL=f"sqlite+aiosqlite:///{_dir}/test.db", TIMEZONE="Europe/Moscow")
+                  DATABASE_URL=os.getenv("TEST_DATABASE_URL", f"sqlite+aiosqlite:///{_dir}/test.db"), TIMEZONE="Europe/Moscow")
 
 import httpx  # noqa: E402
 import pytest_asyncio  # noqa: E402
@@ -38,6 +38,7 @@ class Person:
 
 @pytest_asyncio.fixture
 async def client():
+    await engine.dispose()  # connections belong to the previous test's event loop
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
@@ -45,6 +46,7 @@ async def client():
     notifier._last.clear()
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
         yield c
+    await engine.dispose()
 
 
 @pytest_asyncio.fixture

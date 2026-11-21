@@ -23,7 +23,7 @@ class Settings:
         self.import_every_hours: float = float(os.getenv("IMPORT_EVERY_HOURS", "3"))
         self.timepad_token: str = os.getenv("TIMEPAD_TOKEN", "")
         self.timepad_city: str = os.getenv("TIMEPAD_CITY", "Москва")
-        self.import_days_ahead: int = int(os.getenv("IMPORT_DAYS_AHEAD", "10"))
+        self.import_days_ahead: int = int(os.getenv("IMPORT_DAYS_AHEAD", "7"))
         self.operator_name: str = os.getenv("OPERATOR_NAME", "")
         self.contact_email: str = os.getenv("CONTACT_EMAIL", "")
         self.init_data_max_age: int = int(os.getenv("INIT_DATA_MAX_AGE", str(24 * 3600)))

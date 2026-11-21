@@ -19,7 +19,7 @@ TZ = ZoneInfo(settings.timezone)
 
 CATEGORIES = {
     "music": "Музыка", "party": "Вечеринки", "food": "Еда", "games": "Игры", "art": "Искусство",
-    "theater": "Театр", "cinema": "Кино", "talk": "Лекции", "sport": "Спорт", "dating": "Знакомства",
+    "theater": "Театр", "cinema": "Кино", "talk": "Лекции", "sport": "Спорт", "walk": "Прогулки", "dating": "Знакомства",
     "other": "Другое",
 }
 

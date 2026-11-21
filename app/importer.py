@@ -16,11 +16,17 @@ async def save_events(items: list, city: str) -> dict:
     """Adds new events and refreshes known ones. Hidden events stay hidden."""
     added = updated = 0
     async with Session() as session:
+        known = {}
+        ids = [item["source_id"] for item in items]
+        for start in range(0, len(ids), 500):
+            rows = await session.execute(select(Event).where(
+                Event.source == items[0]["source"], Event.source_id.in_(ids[start:start + 500])))
+            known.update({event.source_id: event for event in rows.scalars()})
         for item in items:
-            event = (await session.execute(select(Event).where(
-                Event.source == item["source"], Event.source_id == item["source_id"]))).scalar_one_or_none()
+            event = known.get(item["source_id"])
             if event is None:
-                session.add(Event(city=city, **item))
+                event = known[item["source_id"]] = Event(city=city, **item)
+                session.add(event)
                 added += 1
             else:
                 changed = False

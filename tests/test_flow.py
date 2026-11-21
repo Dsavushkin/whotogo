@@ -9,7 +9,7 @@ from app.api import day_bounds
 from app.auth import verify_init_data
 from app.jobs import send_after_prompts
 from app.notify import notifier
-from app.sources.timepad import price_text, to_event
+from app.sources.timepad import price_text, short, to_event
 from tests.conftest import Person, add_event
 
 
@@ -172,17 +172,49 @@ def test_day_bounds():
 
 
 def test_timepad_mapping():
-    item = {"id": 777, "name": "Винил-вечер &amp; джаз", "starts_at": "2026-11-21T20:00:00+0300",
+    item = {"id": 777, "name": "Винил-вечер &quot;Chill&quot; &amp; джаз", "starts_at": "2026-11-21T20:00:00+0300",
             "ends_at": "2026-11-21T23:00:00+0300", "url": "https://x.timepad.ru/event/777/",
             "description_short": "<p>Приносите   пластинки</p>", "categories": [{"id": 1, "name": "Концерты"}],
-            "location": {"city": "Москва", "address": "Бауманская, 11"}, "organization": {"name": "Лофт"},
-            "registration_data": {"price_min": 500, "price_max": 1500}, "age_limit": "18"}
+            "location": {"city": "Москва", "address": "Николоямская ул. 1, Библиотека иностранной литературы, "
+                         "центральный вход, Культурный центр «Франкотека», 2 этаж"},
+            "organization": {"name": "Лофт"}, "age_limit": "18",
+            "registration_data": {"price_min": 500, "price_max": 1500, "is_registration_open": True}}
     event = to_event(item)
-    assert event["title"] == "Винил-вечер & джаз" and event["category"] == "music"
+    assert event["title"] == 'Винил-вечер "Chill" & джаз' and event["category"] == "music"
     assert event["starts_at"] == datetime(2026, 11, 21, 17, 0) and event["price"] == "от 500 ₽"
-    assert event["description"] == "Приносите пластинки" and event["source_id"] == "777"
+    assert event["description"] == "Приносите пластинки Организатор: Лофт." and event["source_id"] == "777"
+    assert event["place"] == "Николоямская ул. 1"
+    assert short("Место встречи: м. Китай-город, 10 выход, налево через пешеходный переход у памятника Кириллу "
+                 "и Мефодию. Администратор с табличкой.") == "м. Китай-город, 10 выход"
+    assert short("Покровка, 20") == "Покровка, 20" and len(short("Очень " * 30)) <= 49
+    assert to_event({**item, "categories": [{"name": "Экскурсии и путешествия"}], "name": "Бункер"})["category"] == "walk"
     assert to_event({**item, "categories": [{"name": "Для детей"}]}) is None
+    assert to_event({**item, "age_limit": "6"}) is None
     assert to_event({**item, "location": {"city": "Без города"}}) is None
     assert to_event({**item, "name": "Вебинар по продажам"}) is None
+    assert to_event({**item, "name": "Квест-экскурсия (без гида)"}) is None
+    assert to_event({**item, "ends_at": "2026-11-30T23:00:00+0300"}) is None
+    assert to_event({**item, "registration_data": {"is_registration_open": False}}) is None
     assert price_text({"price_min": 0, "price_max": 0}) == "Бесплатно" and price_text(None) == ""
     assert price_text({"price_min": 1200, "price_max": 1200}) == "1 200 ₽"
+
+
+async def test_import_adds_then_updates(client):
+    import httpx
+    from app.importer import save_events
+    from app.sources import timepad
+
+    def page(request):
+        skip = int(request.url.params["skip"])
+        assert request.headers["authorization"] == "Bearer T" and request.url.params["cities"] == "Москва"
+        make = lambda i, hour: {"id": i, "name": f"Вечер {i % 3}", "starts_at": f"2026-11-21T{hour}:00:00+0300",
+                                "location": {"address": "Покровка, 20"}, "age_limit": "16", "categories": []}
+        values = [make(skip + i, 18 + i % 2) for i in range(100 if skip == 0 else 4)]
+        return httpx.Response(200, json={"total": 104, "values": values})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(page)) as http:
+        items = await timepad.fetch("T", "Москва", 7, client=http)
+    assert len(items) == 3  # same title on the same day is kept once
+    assert await save_events(items, "msk") == {"added": 3, "updated": 0, "seen": 3}
+    items[0]["price"] = "Бесплатно"
+    assert await save_events(items, "msk") == {"added": 0, "updated": 1, "seen": 3}
