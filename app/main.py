@@ -125,6 +125,8 @@ async def no_stale_pages(request: Request, call_next):
     response = await call_next(request)
     if not request.url.path.startswith(("/api/", "/fonts/")):
         response.headers["Cache-Control"] = "no-cache"
+    if request.url.path.startswith("/promo/"):  # App Store Connect fetches the promo images from here
+        response.headers["Access-Control-Allow-Origin"] = "https://appstoreconnect.apple.com"
     return response
 
 
