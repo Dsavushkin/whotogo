@@ -46,6 +46,11 @@ function when(iso, withTime) {
   return withTime === false ? label : label + ' · ' + time;
 }
 const ava = (person, size) => `<span class="ava ${size || ''} c${(person.id || 0) % 6}" aria-hidden="true">${esc((person.name || '?').trim().charAt(0).toUpperCase())}</span>`;
+/** Inline style with the event poster; a dark veil keeps white text readable. */
+const bg = (url, plain) => {
+  if (!/^https:\/\/[^\s"'()]+$/.test(url || '')) return '';
+  return ` style="background-image:${plain ? '' : 'linear-gradient(rgba(14,14,18,.2),rgba(14,14,18,.78)),'}url('${esc(url)}')"`;
+};
 const who = (p) => esc(p.name) + (p.age ? ', ' + p.age : '');
 const lookingText = (n) => n + ' ' + plural(n, 'ищет компанию', 'ищут компанию', 'ищут компанию');
 const goingText = (n) => n + ' ' + plural(n, 'идёт', 'идут', 'идут');
@@ -112,7 +117,7 @@ screens.afisha = async () => {
   const catChip = (id, label) => `<button class="chip small" data-category="${id}" aria-pressed="${state.category === id}">${label}</button>`;
   const cards = data.events.map((e, i) => (i === 0 ? `
     <button class="hero" data-go="event/${e.id}">
-      <div class="poster p0">
+      <div class="poster p0${e.image ? ' photo' : ''}"${bg(e.image)}>
         <div class="between"><span class="badge">${when(e.starts_at)}</span><span class="badge dim">${esc(e.category_name)}</span></div>
         <h2 class="display">${esc(e.title)}</h2>
       </div>
@@ -123,7 +128,7 @@ screens.afisha = async () => {
       </div>
     </button>` : `
     <button class="compact" data-go="event/${e.id}">
-      <span class="tile display p${1 + (e.id % 5)}">${esc(e.category_name)}</span>
+      ${e.image ? `<span class="tile photo"${bg(e.image, true)} role="img" aria-label="${esc(e.category_name)}"></span>` : `<span class="tile display p${1 + (e.id % 5)}">${esc(e.category_name)}</span>`}
       <span class="col">
         <span class="tiny strong muted">${when(e.starts_at)}${e.price ? ' · ' + esc(e.price) : ''}</span>
         <h2>${esc(e.title)}</h2>
@@ -151,7 +156,7 @@ screens.event = async (id) => {
     : `<button class="btn ${mine === 'going' ? 'lime' : 'soft'}" data-attend="${mine === 'going' ? 'none' : 'going'}">${mine === 'going' ? ICON.check + ' Иду' : 'Иду'}</button>
        <button class="btn ${mine === 'looking' ? 'lime' : 'ink'}" data-looking>${mine === 'looking' ? ICON.check + ' Ищу компанию' : 'Ищу компанию'}</button>`;
   return `<div class="screen" style="padding-top:0">
-    <div class="event-top p0">
+    <div class="event-top p0${e.image ? ' photo' : ''}"${bg(e.image)}>
       <div class="between">${backBtn('ghost')}<span class="badge dim">${esc(e.category_name)}</span></div>
       <div><span class="badge">${when(e.starts_at)}</span><h1 class="display">${esc(e.title)}</h1></div>
     </div>

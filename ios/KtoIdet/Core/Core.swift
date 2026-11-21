@@ -49,6 +49,7 @@ struct EventCard: Codable, Identifiable, Hashable {
     let going: Int
     let looking: Int
     let started: Bool
+    var image: String?
     // Only on the event page and in «my events».
     var description: String?
     var url: String?

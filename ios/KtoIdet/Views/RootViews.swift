@@ -452,8 +452,8 @@ struct HeroCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(18)
-            .frame(minHeight: 196, alignment: .bottom)
-            .background(Color.cobalt)
+            .frame(minHeight: (event.image ?? "").isEmpty ? 196 : 230, alignment: .bottom)
+            .background(PosterBackground(image: event.image))
 
             VStack(alignment: .leading, spacing: 10) {
                 Text([event.place, event.price].filter { !$0.isEmpty }.joined(separator: " · "))
@@ -484,13 +484,19 @@ struct CompactCard: View {
     var body: some View {
         let colors = Palette.tile(event.id)
         HStack(spacing: 14) {
-            Text(event.categoryName)
-                .font(.display(12))
-                .foregroundStyle(colors.1)
-                .multilineTextAlignment(.leading)
-                .padding(10)
-                .frame(width: 92, height: 92, alignment: .bottomLeading)
-                .background(colors.0, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            if let image = event.image, !image.isEmpty {
+                PosterBackground(image: image, veil: false)
+                    .frame(width: 92, height: 92)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            } else {
+                Text(event.categoryName)
+                    .font(.display(12))
+                    .foregroundStyle(colors.1)
+                    .multilineTextAlignment(.leading)
+                    .padding(10)
+                    .frame(width: 92, height: 92, alignment: .bottomLeading)
+                    .background(colors.0, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            }
             VStack(alignment: .leading, spacing: 6) {
                 Text(When.label(event.startsAt) + (event.price.isEmpty ? "" : " · " + event.price))
                     .font(.ui(12, .heavy))

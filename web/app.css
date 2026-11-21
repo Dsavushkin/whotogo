@@ -144,3 +144,8 @@ textarea.input{resize:none;min-height:96px}
 .sheet h2{font-size:20px}
 #toast{border:1px solid rgba(255,255,255,.22);position:fixed;left:50%;transform:translateX(-50%);bottom:calc(96px + var(--bottom));background:var(--ink);color:#fff;padding:12px 18px;border-radius:18px;font-size:14px;font-weight:700;z-index:30;max-width:calc(100% - 40px);text-align:center}
 @media (prefers-reduced-motion:no-preference){.screen{animation:in .18s ease-out}@keyframes in{from{opacity:0;transform:translateY(6px)}}}
+
+.photo{background-size:cover;background-position:center;background-color:var(--ink)}
+.hero .poster.photo{min-height:230px}
+.event-top.photo{padding-bottom:26px;gap:120px}
+.compact .tile.photo{padding:0}

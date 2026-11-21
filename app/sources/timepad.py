@@ -42,6 +42,15 @@ def pick_category(names: list, title: str) -> str:
     return "other"
 
 
+def poster(item: dict) -> str:
+    """Organizer's poster, a bit larger than the tiny default preview."""
+    image = item.get("poster_image") or {}
+    url = str(image.get("default_url") or "")
+    if not url.startswith("https://"):
+        return ""
+    return re.sub(r"/-/preview/\d+x\d+/", "/-/preview/960x960/", url)[:500]
+
+
 def price_text(reg: Optional[dict]) -> str:
     reg = reg or {}
     low, high = reg.get("price_min"), reg.get("price_max")
@@ -97,6 +106,7 @@ def to_event(item: dict) -> Optional[dict]:
         "category": pick_category(names, title), "starts_at": starts, "ends_at": ends,
         "place": short(address), "address": address[:300],
         "price": price_text(item.get("registration_data")), "url": str(item.get("url") or "")[:500],
+        "image": poster(item),
     }
 
 
@@ -121,7 +131,7 @@ async def fetch(token: str, city: str, days_ahead: int, client: Optional[httpx.A
         "limit": 100, "skip": 0, "cities": city, "sort": "+starts_at",
         "starts_at_min": now.strftime("%Y-%m-%dT%H:%M:%S+0000"),
         "starts_at_max": (now + timedelta(days=days_ahead)).strftime("%Y-%m-%dT%H:%M:%S+0000"),
-        "fields": "location,description_short,categories,organization,registration_data,age_limit,ends_at",
+        "fields": "location,description_short,categories,organization,registration_data,age_limit,ends_at,poster_image",
         "access_statuses": "public", "moderation_statuses": "featured,shown",
     }
     own = client is None

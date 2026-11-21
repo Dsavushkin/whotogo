@@ -44,7 +44,9 @@ struct EventView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(20)
-                .background(Color.cobalt, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .frame(minHeight: (event.image ?? "").isEmpty ? 0 : 220, alignment: .bottom)
+                .background(PosterBackground(image: event.image))
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
 
                 HStack(alignment: .top, spacing: 10) {
                     fact("Где", event.place.isEmpty ? "Уточняется" : event.place)

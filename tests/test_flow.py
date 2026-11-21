@@ -178,12 +178,16 @@ def test_timepad_mapping():
             "location": {"city": "Москва", "address": "Николоямская ул. 1, Библиотека иностранной литературы, "
                          "центральный вход, Культурный центр «Франкотека», 2 этаж"},
             "organization": {"name": "Лофт"}, "age_limit": "18",
+            "poster_image": {"default_url": "https://ucare.timepad.ru/abc/-/crop/1672x940/0,0/-/preview/308x600/-/format/jpeg/p.jpg",
+                             "uploadcare_url": "//ucare.timepad.ru/abc/"},
             "registration_data": {"price_min": 500, "price_max": 1500, "is_registration_open": True}}
     event = to_event(item)
     assert event["title"] == 'Винил-вечер "Chill" & джаз' and event["category"] == "music"
     assert event["starts_at"] == datetime(2026, 11, 21, 17, 0) and event["price"] == "от 500 ₽"
     assert event["description"] == "Приносите пластинки Организатор: Лофт." and event["source_id"] == "777"
     assert event["place"] == "Николоямская ул. 1"
+    assert event["image"] == "https://ucare.timepad.ru/abc/-/crop/1672x940/0,0/-/preview/960x960/-/format/jpeg/p.jpg"
+    assert to_event({**item, "poster_image": None})["image"] == ""
     assert short("Место встречи: м. Китай-город, 10 выход, налево через пешеходный переход у памятника Кириллу "
                  "и Мефодию. Администратор с табличкой.") == "м. Китай-город, 10 выход"
     assert short("Покровка, 20") == "Покровка, 20" and len(short("Очень " * 30)) <= 49

@@ -10,7 +10,7 @@ from .notify import status
 from .sources import timepad
 
 log = logging.getLogger("whotogo.import")
-FIELDS = ("title", "description", "category", "starts_at", "ends_at", "place", "address", "price", "url")
+FIELDS = ("title", "description", "category", "starts_at", "ends_at", "place", "address", "price", "url", "image")
 
 
 async def save_events(items: list, city: str) -> dict:

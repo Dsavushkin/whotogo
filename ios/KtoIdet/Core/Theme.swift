@@ -204,6 +204,31 @@ struct Field<Content: View>: View {
     }
 }
 
+/// The organizer's poster under a dark veil; the cobalt block shows while it loads or if there is none.
+struct PosterBackground: View {
+    let image: String?
+    var veil = true
+
+    var body: some View {
+        ZStack {
+            Color.cobalt
+            if let image, let url = URL(string: image), !image.isEmpty {
+                AsyncImage(url: url) { phase in
+                    if let picture = phase.image {
+                        picture.resizable().scaledToFill()
+                    }
+                }
+                if veil {
+                    LinearGradient(colors: [Color.ink.opacity(0.2), Color.ink.opacity(0.78)],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+            }
+        }
+        .clipped()
+        .accessibilityHidden(true)
+    }
+}
+
 /// Wraps children onto new lines, like words in a paragraph.
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8

@@ -63,7 +63,7 @@ def event_card(e: Event, going: int = 0, looking: int = 0) -> dict:
     return {
         "id": e.id, "title": e.title, "category": e.category, "category_name": CATEGORIES.get(e.category, "Другое"),
         "starts_at": to_local_iso(e.starts_at), "ends_at": to_local_iso(e.ends_at), "place": e.place,
-        "address": e.address, "price": e.price, "going": going, "looking": looking,
+        "address": e.address, "price": e.price, "image": e.image or "", "going": going, "looking": looking,
         "started": e.starts_at <= utcnow(),
     }
 

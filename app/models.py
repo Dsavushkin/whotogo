@@ -47,6 +47,7 @@ class Event(Base):
     address: Mapped[str] = mapped_column(String(300), default="")
     price: Mapped[str] = mapped_column(String(120), default="")
     url: Mapped[str] = mapped_column(String(500), default="")
+    image: Mapped[str] = mapped_column(String(500), default="")  # poster from the organizer, may be empty
     city: Mapped[str] = mapped_column(String(16), default="msk", index=True)
     capacity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     organizer_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
