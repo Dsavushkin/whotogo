@@ -7,6 +7,7 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import MenuButtonWebApp, Message, WebAppInfo
 from sqlalchemy import func, select
 
+from .auth import issue_login_code
 from .config import settings
 from .db import Session
 from .importer import run_import
@@ -38,6 +39,23 @@ async def start(message: Message, command: CommandObject):
 @router.message(Command("id"))
 async def my_id(message: Message):
     await message.answer(f"Ваш Telegram ID: {message.from_user.id}")
+
+
+@router.message(Command("login"))
+async def login(message: Message):
+    """Code for signing in to the app outside Telegram."""
+    tg = message.from_user
+    async with Session() as session:
+        user = (await session.execute(select(User).where(User.tg_id == tg.id))).scalar_one_or_none()
+        if user is None:
+            user = User(tg_id=tg.id, name=(tg.first_name or "")[:64], username=(tg.username or "")[:64],
+                        city=settings.city)
+            session.add(user)
+            await session.commit()
+        if user.is_banned:
+            return
+        code = await issue_login_code(session, user)
+    await message.answer(f"Код для входа в приложение: {code}\nДействует 10 минут. Никому его не сообщайте.")
 
 
 @router.message(Command("help"))

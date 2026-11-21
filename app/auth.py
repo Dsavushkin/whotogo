@@ -3,16 +3,18 @@ from typing import Optional
 import hashlib
 import hmac
 import json
+import secrets
 import time
+from datetime import timedelta
 from urllib.parse import parse_qsl
 
 from fastapi import Depends, Header, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import settings
 from .db import get_session
-from .models import User
+from .models import AuthToken, LoginCode, User, utcnow
 
 
 def verify_init_data(init_data: str, bot_token: str, max_age: int, now: Optional[float] = None) -> Optional[dict]:
@@ -44,6 +46,14 @@ async def current_user(
     session: AsyncSession = Depends(get_session),
 ) -> User:
     tg: Optional[dict] = None
+    if authorization.startswith("Bearer "):
+        row = await session.get(AuthToken, token_hash(authorization[7:]))
+        user = await session.get(User, row.user_id) if row else None
+        if user is None:
+            raise HTTPException(401, "Войдите заново")
+        if user.is_banned:
+            raise HTTPException(403, "Аккаунт заблокирован")
+        return user
     if authorization.startswith("tma "):
         tg = verify_init_data(authorization[4:], settings.bot_token, settings.init_data_max_age)
     elif settings.dev and x_dev_user:
@@ -66,3 +76,32 @@ async def current_user(
     if user.is_banned:
         raise HTTPException(403, "Аккаунт заблокирован")
     return user
+
+
+def token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+async def issue_login_code(session: AsyncSession, user: User, minutes: int = 10) -> str:
+    """A fresh 6-digit code for the user; older codes of the same user stop working."""
+    await session.execute(delete(LoginCode).where(
+        (LoginCode.user_id == user.id) | (LoginCode.expires_at < utcnow())))
+    while True:
+        code = f"{secrets.randbelow(10 ** 6):06d}"
+        if await session.get(LoginCode, code) is None:
+            break
+    session.add(LoginCode(code=code, user_id=user.id, expires_at=utcnow() + timedelta(minutes=minutes)))
+    await session.commit()
+    return code
+
+
+async def exchange_code(session: AsyncSession, code: str) -> Optional[str]:
+    """Code -> long-lived token (None if the code is wrong or expired). A code works once."""
+    row = await session.get(LoginCode, code)
+    if row is None or row.expires_at < utcnow():
+        return None
+    token = secrets.token_urlsafe(32)
+    session.add(AuthToken(token_hash=token_hash(token), user_id=row.user_id))
+    await session.delete(row)
+    await session.commit()
+    return token

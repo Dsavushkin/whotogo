@@ -109,3 +109,19 @@ class Report(Base):
     target_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     reason: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class LoginCode(Base):
+    """One-time code from the bot (/login) to sign in outside Telegram, e.g. in the iPhone app."""
+    __tablename__ = "login_codes"
+    code: Mapped[str] = mapped_column(String(6), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class AuthToken(Base):
+    """A signed-in device. Only the SHA-256 of the token is stored."""
+    __tablename__ = "auth_tokens"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

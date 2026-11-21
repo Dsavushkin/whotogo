@@ -1,17 +1,18 @@
 """HTTP API used by the Mini App (and later by the iPhone app)."""
-from typing import Optional
+import time
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .auth import current_user
+from .auth import current_user, exchange_code, token_hash
 from .config import settings
 from .db import get_session
-from .models import Attendance, Block, Event, Like, Match, Message, Report, User, utcnow
+from .models import Attendance, AuthToken, Block, Event, Like, LoginCode, Match, Message, Report, User, utcnow
 from .notify import notifier
 
 router = APIRouter(prefix="/api")
@@ -126,6 +127,38 @@ async def make_match(session: AsyncSession, me: User, other_id: int, event: Even
     return match
 
 
+# ---------- sign-in outside Telegram ----------
+
+class CodeIn(BaseModel):
+    code: str = Field(pattern=r"^\d{6}$")
+
+
+_attempts: dict = {}  # ip -> recent attempt times; guards the 6-digit code against guessing
+
+
+@router.post("/auth/code")
+async def auth_code(body: CodeIn, request: Request, session: AsyncSession = Depends(get_session)):
+    ip, now = (request.client.host if request.client else "?"), time.monotonic()
+    recent = [t for t in _attempts.get(ip, []) if now - t < 600]
+    if len(recent) >= 8:
+        raise HTTPException(429, "Слишком много попыток. Попробуйте через 10 минут.")
+    _attempts[ip] = recent + [now]
+    token = await exchange_code(session, body.code)
+    if token is None:
+        raise HTTPException(400, "Код не подошёл. Получите новый: команда /login в боте.")
+    _attempts.pop(ip, None)
+    return {"token": token}
+
+
+@router.post("/auth/logout")
+async def auth_logout(authorization: str = Header(default=""), me: User = Depends(current_user),
+                      session: AsyncSession = Depends(get_session)):
+    if authorization.startswith("Bearer "):
+        await session.execute(delete(AuthToken).where(AuthToken.token_hash == token_hash(authorization[7:])))
+        await session.commit()
+    return {"ok": True}
+
+
 # ---------- profile ----------
 
 class ProfileIn(BaseModel):
@@ -170,6 +203,8 @@ async def delete_me(me: User = Depends(current_user), session: AsyncSession = De
     await session.execute(delete(Attendance).where(Attendance.user_id == me.id))
     await session.execute(delete(Block).where(or_(Block.user_id == me.id, Block.target_id == me.id)))
     await session.execute(delete(Report).where(Report.reporter_id == me.id))
+    await session.execute(delete(AuthToken).where(AuthToken.user_id == me.id))
+    await session.execute(delete(LoginCode).where(LoginCode.user_id == me.id))
     await session.execute(delete(User).where(User.id == me.id))
     await session.commit()
     return {"ok": True}

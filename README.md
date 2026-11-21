@@ -23,19 +23,18 @@
 
 ## Установка на сервер (Ubuntu 22/24)
 
-1. На сервере создать ключ и показать его:
-   ```
-   apt-get update && apt-get install -y git
-   ssh-keygen -t ed25519 -N "" -f ~/.ssh/whotogo -q && cat ~/.ssh/whotogo.pub
-   ```
-2. Строку из вывода добавить в GitHub: репозиторий → Settings → Deploy keys → Add deploy key (только чтение).
-3. Скачать проект и запустить установку:
-   ```
-   GIT_SSH_COMMAND="ssh -i ~/.ssh/whotogo -o StrictHostKeyChecking=accept-new" git clone git@github.com:Dsavushkin/whotogo.git /opt/whotogo
-   cd /opt/whotogo && git config core.sshCommand "ssh -i ~/.ssh/whotogo" && bash deploy/install.sh
-   ```
-   Скрипт спросит токен бота, поставит Docker, выпустит https-сертификат и включит автообновление:
-   каждые 2 минуты сервер сверяется с GitHub и пересобирается, если код изменился.
+Одна команда в консоли сервера (под root):
+
+```
+apt-get update && apt-get install -y git && git clone https://github.com/Dsavushkin/whotogo /opt/whotogo && bash /opt/whotogo/deploy/install.sh
+```
+
+Скрипт спросит токен бота, ваш Telegram ID и токен Timepad, поставит Docker, выпустит https-сертификат
+и включит автообновление: каждые 2 минуты сервер сверяется с GitHub и пересобирается, если код изменился.
+
+Если репозиторий снова станет приватным, серверу понадобится ключ: `ssh-keygen -t ed25519 -N "" -f ~/.ssh/whotogo`,
+открытую часть добавить в GitHub → Settings → Deploy keys, затем в `/opt/whotogo` выполнить
+`git remote set-url origin git@github.com:Dsavushkin/whotogo.git && git config core.sshCommand "ssh -i ~/.ssh/whotogo"`.
 
 Без своего домена адрес будет вида `https://1-2-3-4.sslip.io`. Свой домен: направить его на IP сервера,
 вписать в `DOMAIN=` в файле `/opt/whotogo/.env` и выполнить `docker compose up -d`.
@@ -57,6 +56,8 @@
 `/stats` — цифры · `/import` — обновить афишу сейчас · `/organizer <tg id>` — открыть кабинет организатора ·
 `/ban <id>`, `/unban <id>` · `/hide <id события>` · `/reports` — жалобы.
 Любое сообщение боту от пользователя пересылается администраторам.
+
+Для всех: `/login` — одноразовый код для входа в приложение вне Telegram (нужен будущему приложению для iPhone).
 
 ## Проверки
 

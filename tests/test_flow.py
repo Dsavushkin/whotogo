@@ -218,3 +218,37 @@ async def test_import_adds_then_updates(client):
     assert await save_events(items, "msk") == {"added": 3, "updated": 0, "seen": 3}
     items[0]["price"] = "Бесплатно"
     assert await save_events(items, "msk") == {"added": 0, "updated": 1, "seen": 3}
+
+
+async def test_sign_in_with_code_from_bot(people, client):
+    from sqlalchemy import select, update
+    from app import api
+    from app.auth import issue_login_code
+    from app.db import Session
+    from app.models import LoginCode, User
+
+    vera = people[0]
+    api._attempts.clear()
+    async with Session() as session:
+        user = (await session.execute(select(User).where(User.id == vera.id))).scalar_one()
+        old = await issue_login_code(session, user)
+        code = await issue_login_code(session, user)
+    post = lambda c: client.post("/api/auth/code", json={"code": c})
+    assert (await post(old)).status_code == 400 or old == code  # a newer code replaces the older one
+    token = (await post(code)).json()["token"]
+    assert (await post(code)).status_code == 400  # works once
+    bearer = {"Authorization": f"Bearer {token}"}
+    assert (await client.get("/api/me", headers=bearer)).json()["name"] == "Вера"
+    assert (await client.get("/api/me", headers={"Authorization": "Bearer nope"})).status_code == 401
+
+    async with Session() as session:
+        expired = await issue_login_code(session, user)
+        await session.execute(update(LoginCode).values(expires_at=api.utcnow() - api.timedelta(minutes=1)))
+        await session.commit()
+    assert (await post(expired)).status_code == 400
+
+    assert (await client.post("/api/auth/logout", headers=bearer)).status_code == 200
+    assert (await client.get("/api/me", headers=bearer)).status_code == 401
+    codes = [(await post("000000")).status_code for _ in range(9)]
+    assert codes[-1] == 429 and 400 in codes  # guessing is cut off
+    api._attempts.clear()
