@@ -59,7 +59,9 @@ struct EventView: View {
                     Text(text).font(.ui(15)).foregroundStyle(Color.ink)
                 }
 
-                NavigationLink(value: Route.people(event.id)) {
+                Button {
+                    if model.isGuest { model.showLogin = true } else { showPeople = true }
+                } label: {
                     Card {
                         HStack {
                             Text("Кто идёт").font(.ui(17, .heavy)).foregroundStyle(Color.ink)
@@ -118,10 +120,12 @@ struct EventView: View {
         } else {
             HStack(spacing: 8) {
                 Button(mine == "going" ? "✓ Иду" : "Иду") {
+                    if model.isGuest { model.showLogin = true; return }
                     Task { await attend(mine == "going" ? "none" : "going", note: "") }
                 }
                 .buttonStyle(BigButtonStyle(fill: mine == "going" ? .lime : .soft, ink: .ink))
                 Button(mine == "looking" ? "✓ Ищу компанию" : "Ищу компанию") {
+                    if model.isGuest { model.showLogin = true; return }
                     note = event.myNote ?? ""
                     askNote = true
                 }

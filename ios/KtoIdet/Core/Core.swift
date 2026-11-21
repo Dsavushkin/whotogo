@@ -284,6 +284,9 @@ final class AppModel {
     var phase: Phase = .loading
     var me: Me?
     var tab = 0
+    /// Guests can browse the afisha; everything personal asks to sign in first.
+    var showLogin = false
+    var isGuest: Bool { me == nil }
     /// A fresh mutual match to celebrate (shown over everything).
     var matchToShow: Int?
     var toast: String?
@@ -366,6 +369,7 @@ final class AppModel {
 
     private func apply(_ me: Me) {
         self.me = me
+        showLogin = false
         phase = me.adultOk ? .ready : .profile
     }
 }

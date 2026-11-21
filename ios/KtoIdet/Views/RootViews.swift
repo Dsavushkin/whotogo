@@ -26,7 +26,7 @@ struct RootView: View {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .signedOut:
-                LoginView()
+                MainTabs()  // guest: the afisha is open, the rest asks to sign in
             case .profile:
                 ProfileFormView(first: true)
             case .ready:
@@ -60,6 +60,9 @@ struct RootView: View {
         .task { await model.start() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { Task { await model.refreshNudges() } }
+        }
+        .sheet(isPresented: Binding(get: { model.showLogin }, set: { model.showLogin = $0 })) {
+            LoginView(asSheet: true).environment(model)
         }
         .fullScreenCover(item: Binding(
             get: { model.matchToShow.map(MatchID.init) },
@@ -108,15 +111,34 @@ struct MainTabs: View {
             NavigationStack { AfishaView().appRoutes() }
                 .tabItem { Label("Афиша", systemImage: "calendar") }
                 .tag(0)
-            NavigationStack { PeopleView(eventId: nil).appRoutes() }
-                .tabItem { Label("Люди", systemImage: "person.2") }
-                .tag(1)
-            NavigationStack { ChatsView().appRoutes() }
-                .tabItem { Label("Чаты", systemImage: "bubble.left.and.bubble.right") }
-                .tag(2)
-            NavigationStack { ProfileView().appRoutes() }
-                .tabItem { Label("Профиль", systemImage: "person.crop.circle") }
-                .tag(3)
+            NavigationStack {
+                if model.isGuest {
+                    SignInPrompt(title: "Ищут компанию",
+                                 text: "Войдите, чтобы видеть, кто ищет компанию на события этой недели.")
+                } else {
+                    PeopleView(eventId: nil).appRoutes()
+                }
+            }
+            .tabItem { Label("Люди", systemImage: "person.2") }
+            .tag(1)
+            NavigationStack {
+                if model.isGuest {
+                    SignInPrompt(title: "Чаты", text: "Чат открывается, когда вы и другой гость оба нажали «Пойдём вместе».")
+                } else {
+                    ChatsView().appRoutes()
+                }
+            }
+            .tabItem { Label("Чаты", systemImage: "bubble.left.and.bubble.right") }
+            .tag(2)
+            NavigationStack {
+                if model.isGuest {
+                    SignInPrompt(title: "Профиль", text: "Войдите или создайте аккаунт, чтобы отмечаться на событиях.")
+                } else {
+                    ProfileView().appRoutes()
+                }
+            }
+            .tabItem { Label("Профиль", systemImage: "person.crop.circle") }
+            .tag(3)
         }
         .tint(.ink)
         .task { await model.refreshNudges() }
@@ -125,8 +147,31 @@ struct MainTabs: View {
 
 // MARK: - Sign in
 
-struct LoginView: View {
+struct SignInPrompt: View {
+    let title: String
+    let text: String
     @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title).font(.display(28)).foregroundStyle(Color.ink)
+            Text(text).font(.ui(16)).foregroundStyle(Color.muted)
+            Button("Войти или создать аккаунт") { model.showLogin = true }
+                .buttonStyle(BigButtonStyle())
+                .padding(.top, 8)
+            Spacer()
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .screenBackground()
+        .toolbar(.hidden, for: .navigationBar)
+    }
+}
+
+struct LoginView: View {
+    var asSheet = false
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var signup = false
     @State private var email = ""
@@ -207,6 +252,20 @@ struct LoginView: View {
             .padding(.top, 24)
         }
         .scrollDismissesKeyboard(.interactively)
+        .background(Color.ground.ignoresSafeArea())
+        .overlay(alignment: .topTrailing) {
+            if asSheet {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Color.ink)
+                        .frame(width: 44, height: 44)
+                        .background(Color.white, in: Circle())
+                }
+                .accessibilityLabel("Закрыть")
+                .padding(16)
+            }
+        }
     }
 
     private func submit() async {
@@ -353,6 +412,7 @@ struct ProfileFormView: View {
 // MARK: - Afisha
 
 struct AfishaView: View {
+    @Environment(AppModel.self) private var model
     @State private var day = "today"
     @State private var category = ""
     @State private var data: EventsResponse?
@@ -365,9 +425,20 @@ struct AfishaView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Москва").font(.ui(13, .bold)).foregroundStyle(Color.muted)
-                    Text(titles[day] ?? "Афиша").font(.display(28)).foregroundStyle(Color.ink)
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Москва").font(.ui(13, .bold)).foregroundStyle(Color.muted)
+                        Text(titles[day] ?? "Афиша").font(.display(28)).foregroundStyle(Color.ink)
+                    }
+                    Spacer()
+                    if model.isGuest {
+                        Button("Войти") { model.showLogin = true }
+                            .font(.ui(15, .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 18)
+                            .frame(height: 44)
+                            .background(Color.ink, in: Capsule())
+                    }
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
