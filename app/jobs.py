@@ -11,6 +11,7 @@ from sqlalchemy import func, or_, select
 from .config import settings
 from .db import Session
 from .importer import run_import
+from .interests import score
 from .models import Attendance, Event, User, utcnow
 from .notify import notifier
 
@@ -53,15 +54,23 @@ WEEKDAY_NUDGES = {
 }
 
 
-async def pick_events(session, start: datetime, end: datetime, limit: int = 3) -> list:
-    """The most wanted events of the period: where people already look for company, then where they go."""
+async def candidate_events(session, start: datetime, end: datetime) -> list:
+    """Events of the period with their counts: (event, going, looking)."""
     from .api import counts_for
     events = list((await session.execute(
         select(Event).where(Event.published, Event.city == settings.city, Event.starts_at >= start,
-                            Event.starts_at < end).order_by(Event.starts_at).limit(300))).scalars())
+                            Event.starts_at < end).order_by(Event.starts_at).limit(400))).scalars())
     counts = await counts_for(session, [e.id for e in events])
-    events.sort(key=lambda e: (-counts.get(e.id, (0, 0))[1], -counts.get(e.id, (0, 0))[0], not e.image, e.starts_at))
-    return [(e, *counts.get(e.id, (0, 0))) for e in events[:limit]]
+    return [(e, *counts.get(e.id, (0, 0))) for e in events]
+
+
+def pick_for(candidates: list, interests: list, limit: int = 3) -> list:
+    """Best events for one person: fitting their interests first, then where people look for company."""
+    def key(item):
+        event, going, looking = item
+        return (-score(event.category, event.title + " " + event.description, interests),
+                -looking, -going, not event.image, event.starts_at)
+    return sorted(candidates, key=key)[:limit]
 
 
 async def send_weekend_nudges(now: Optional[datetime] = None) -> int:
@@ -86,23 +95,28 @@ async def send_weekend_nudges(now: Optional[datetime] = None) -> int:
         people = [p for p in people if p.id not in busy]
         if not people:
             return 0
-        picks = await pick_events(session, now_utc + timedelta(minutes=30), to_utc(midnight + timedelta(days=1)))
-        if len(picks) < 3:
-            more = await pick_events(session, to_utc(midnight + timedelta(days=1)), weekend_end, 3 - len(picks))
-            picks += more
-        lines = []
-        for event, going, looking in picks:
-            start = event.starts_at.replace(tzinfo=timezone.utc).astimezone(tz)
-            when = start.strftime("%H:%M") if start.date() == local.date() else start.strftime("%d.%m, %H:%M")
-            extra = f", {looking} ищут компанию" if looking else ""
-            lines.append(f"• {event.title} — {when}{extra}")
-        text = rule[2]
-        if lines:
-            text += "\n\nЧто выбирают:\n" + "\n".join(lines)
-        text += "\n\nОтметьте «Ищу компанию» — и найдётся, с кем пойти.\nНе присылать такие напоминания: /quiet"
+        today = await candidate_events(session, now_utc + timedelta(minutes=30), to_utc(midnight + timedelta(days=1)))
+        later = await candidate_events(session, to_utc(midnight + timedelta(days=1)), weekend_end)
+
+        def message(person) -> str:
+            interests = person.interests or []
+            picks = pick_for(today, interests)
+            if len(picks) < 3:
+                picks += pick_for(later, interests, 3 - len(picks))
+            lines = []
+            for event, going, looking in picks:
+                start = event.starts_at.replace(tzinfo=timezone.utc).astimezone(tz)
+                when = start.strftime("%H:%M") if start.date() == local.date() else start.strftime("%d.%m, %H:%M")
+                extra = f", {looking} ищут компанию" if looking else ""
+                lines.append(f"• {event.title} — {when}{extra}")
+            text = rule[2]
+            if lines:
+                text += ("\n\nПод ваши интересы:\n" if interests else "\n\nЧто выбирают:\n") + "\n".join(lines)
+            return text + "\n\nОтметьте «Ищу компанию» — и найдётся, с кем пойти.\nНе присылать такие напоминания: /quiet"
+
         for person in people:
             person.last_nudge_at = now_utc
-            await notifier.send(person.tg_id, text, "")
+            await notifier.send(person.tg_id, message(person), "")
             sent += 1
         await session.commit()
     return sent

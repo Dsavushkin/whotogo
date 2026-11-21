@@ -13,6 +13,7 @@ from .auth import (check_password, current_user, exchange_code, hash_password, m
                    token_hash)
 from .config import settings
 from .db import get_session
+from .interests import INTERESTS, score, why
 from .moderation import is_clean
 from .models import Attendance, AuthToken, Block, Event, Like, LoginCode, Match, Message, Report, User, utcnow
 from .notify import notifier
@@ -228,7 +229,7 @@ async def put_me(body: ProfileIn, me: User = Depends(current_user), session: Asy
     require_clean(body.name, body.bio, *body.interests)
     me = await session.merge(me)
     me.name, me.age, me.bio = body.name.strip(), body.age, body.bio.strip()
-    me.interests = [i.strip()[:24] for i in body.interests if i.strip()][:8]
+    me.interests = [i.strip() for i in body.interests if i.strip() in INTERESTS][:5]
     me.adult_ok = True
     await session.commit()
     return me_card(me)
@@ -268,8 +269,8 @@ async def delete_me(me: User = Depends(current_user), session: AsyncSession = De
 # ---------- events ----------
 
 @router.get("/events")
-async def list_events(day: str = "today", category: str = "", me: Optional[User] = Depends(maybe_user),
-                      session: AsyncSession = Depends(get_session)):
+async def list_events(day: str = "today", category: str = "", for_me: bool = False,
+                      me: Optional[User] = Depends(maybe_user), session: AsyncSession = Depends(get_session)):
     """Open to guests: the afisha is the public face of the site."""
     start, end = day_bounds(day)
     city = me.city if me else settings.city
@@ -279,10 +280,24 @@ async def list_events(day: str = "today", category: str = "", me: Optional[User]
         query = query.where(Event.category == category)
     events = list((await session.execute(query.order_by(Event.starts_at).limit(200))).scalars())
     counts = await counts_for(session, [e.id for e in events])
-    cards = [event_card(e, *counts.get(e.id, (0, 0))) for e in events]
-    # Events where people already look for company go first, then by time.
-    cards.sort(key=lambda c: (-c["looking"], c["starts_at"]))
-    return {"events": cards, "categories": CATEGORIES}
+    mine = (me.interests or []) if me else []
+    cards = []
+    for e in events:
+        card = event_card(e, *counts.get(e.id, (0, 0)))
+        text = e.title + " " + e.description
+        card["why"] = why(e.category, text, mine)[:2]
+        card["_score"] = score(e.category, text, mine)
+        cards.append(card)
+    if for_me and mine:
+        # «Для вас»: only fitting events, the best fit first, then where people already look for company.
+        cards = [c for c in cards if c["_score"] > 0]
+        cards.sort(key=lambda c: (-c["_score"], -c["looking"], c["starts_at"]))
+    else:
+        # Events where people already look for company go first, then by time.
+        cards.sort(key=lambda c: (-c["looking"], c["starts_at"]))
+    for c in cards:
+        c.pop("_score")
+    return {"events": cards, "categories": CATEGORIES, "interests": INTERESTS}
 
 
 @router.get("/events/{event_id}")
@@ -338,9 +353,12 @@ async def people(event_id: int, me: User = Depends(current_user), session: Async
     for m in (await session.execute(select(Match).where(
             Match.event_id == event.id, or_(Match.a_id == me.id, Match.b_id == me.id)))).scalars():
         matched[m.b_id if m.a_id == me.id else m.a_id] = m.id
-    return {"event": event_card(event), "people": [
-        {**user_card(u), "note": note, "invited": u.id in invited, "match_id": matched.get(u.id)}
-        for u, note in rows if u.id not in hidden]}
+    mine = set(me.interests or [])
+    found = [{**user_card(u), "note": note, "invited": u.id in invited, "match_id": matched.get(u.id),
+              "common": [i for i in (u.interests or []) if i in mine]}
+             for u, note in rows if u.id not in hidden]
+    found.sort(key=lambda p: -len(p["common"]))  # stable: newest first among equals
+    return {"event": event_card(event), "people": found}
 
 
 @router.post("/events/{event_id}/invite/{user_id}")
@@ -380,9 +398,11 @@ async def people_feed(me: User = Depends(current_user), session: AsyncSession = 
     matched = {}
     for m in (await session.execute(select(Match).where(or_(Match.a_id == me.id, Match.b_id == me.id)))).scalars():
         matched[(m.b_id if m.a_id == me.id else m.a_id, m.event_id)] = m.id
+    mine = set(me.interests or [])
     return {"people": [
         {**user_card(u), "note": note, "event": event_card(e), "invited": (u.id, e.id) in invited,
-         "match_id": matched.get((u.id, e.id))} for u, note, e in rows if u.id not in hidden]}
+         "match_id": matched.get((u.id, e.id)), "common": [i for i in (u.interests or []) if i in mine]}
+        for u, note, e in rows if u.id not in hidden]}
 
 
 @router.get("/my/events")
