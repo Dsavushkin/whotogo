@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from .api import router
 from .config import settings
 from .db import init_db
+from .notify import status
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -19,11 +20,15 @@ async def _keep_running(name: str, job) -> None:
     """Restarts a background job if it stops with an error (wrong token, network trouble)."""
     while True:
         try:
+            status[name] = "starting"
             await job()
+            status[name] = "stopped"
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            logging.getLogger("whotogo").error("%s stopped: %s. Next try in a minute.", name, error)
+            text = f"{type(error).__name__}: {error}".replace(settings.bot_token or "\0", "***")[:300]
+            status[name], status[name + "_error"] = "error", text
+            logging.getLogger("whotogo").error("%s stopped: %s. Next try in a minute.", name, text)
         await asyncio.sleep(60)
 
 
@@ -52,6 +57,26 @@ app.include_router(router)
 @app.get("/health")
 async def health():
     return {"ok": True}
+
+
+@app.get("/api/diag")
+async def diag():
+    """Self-check for the first days after launch: states only, no secrets."""
+    import re
+
+    import httpx
+
+    token = settings.bot_token
+    out = {"bot_token_set": bool(token), "bot_token_shape_ok": bool(re.fullmatch(r"\d{6,12}:[\w-]{30,}", token)),
+           "bot": status.get("bot"), "bot_error": status.get("bot_error"), "import": status.get("import"),
+           "timepad_token_set": bool(settings.timepad_token), "admins": len(settings.admin_ids),
+           "webapp_url": settings.webapp_url}
+    try:
+        async with httpx.AsyncClient(timeout=6) as client:
+            out["telegram"] = (await client.get("https://api.telegram.org/")).status_code
+    except Exception as error:
+        out["telegram"] = f"{type(error).__name__}: {error}"[:200]
+    return out
 
 
 @app.get("/api/config")

@@ -43,3 +43,6 @@ class Notifier:
 
 
 notifier = Notifier()
+
+# What the background parts are doing; shown by /api/diag (no secrets here).
+status: dict = {"bot": "off", "bot_error": "", "import": None}

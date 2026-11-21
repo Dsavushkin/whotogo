@@ -12,7 +12,7 @@ from .config import settings
 from .db import Session
 from .importer import run_import
 from .models import Attendance, Event, Match, Report, User, utcnow
-from .notify import notifier, open_markup
+from .notify import notifier, open_markup, status
 
 log = logging.getLogger("whotogo.bot")
 router = Router()
@@ -184,6 +184,8 @@ async def run_bot() -> None:
             await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
                 text="Афиша", web_app=WebAppInfo(url=settings.webapp_url + "/")))
         await bot.delete_webhook(drop_pending_updates=False)
+        me = await bot.get_me()
+        status["bot"], status["bot_error"] = f"polling as @{me.username}", ""
         await dispatcher.start_polling(bot, handle_signals=False)
     finally:
         notifier.bot = None

@@ -6,6 +6,7 @@ from sqlalchemy import select
 from .config import settings
 from .db import Session
 from .models import Event
+from .notify import status
 from .sources import timepad
 
 log = logging.getLogger("whotogo.import")
@@ -46,7 +47,9 @@ async def run_import() -> dict:
         items = await timepad.fetch(settings.timepad_token, settings.timepad_city, settings.import_days_ahead)
     except Exception as error:
         log.warning("timepad import failed: %s", error)
+        status["import"] = {"error": f"{type(error).__name__}: {error}"[:200]}
         return {"error": f"Timepad: {error}"}
     result = await save_events(items, settings.city)
     log.info("import done: %s", result)
+    status["import"] = result
     return result
