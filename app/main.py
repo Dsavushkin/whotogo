@@ -109,6 +109,11 @@ async def privacy():
     return _legal("privacy.html")
 
 
+@app.get("/support", response_class=HTMLResponse)
+async def support():
+    return _legal("support.html")
+
+
 @app.get("/terms", response_class=HTMLResponse)
 async def terms():
     return _legal("terms.html")
