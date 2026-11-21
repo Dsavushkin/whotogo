@@ -15,13 +15,25 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 WEB = Path(__file__).resolve().parent.parent / "web"
 
 
+async def _keep_running(name: str, job) -> None:
+    """Restarts a background job if it stops with an error (wrong token, network trouble)."""
+    while True:
+        try:
+            await job()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logging.getLogger("whotogo").error("%s stopped: %s. Next try in a minute.", name, error)
+        await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     tasks = []
     if settings.run_bot and settings.bot_token:
         from .bot import run_bot
-        tasks.append(asyncio.create_task(run_bot()))
+        tasks.append(asyncio.create_task(_keep_running("bot", run_bot)))
     if settings.run_jobs:
         from .jobs import run_jobs
         tasks.append(asyncio.create_task(run_jobs()))
