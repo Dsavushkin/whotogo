@@ -174,18 +174,32 @@ async def anything(message: Message):
                              reply_markup=open_markup("", "Открыть афишу"))
 
 
+dispatcher = Dispatcher()
+dispatcher.include_router(router)
+
+
+def make_bot() -> Bot:
+    session = None
+    if settings.telegram_api_base:
+        from aiogram.client.session.aiohttp import AiohttpSession
+        from aiogram.client.telegram import TelegramAPIServer
+        session = AiohttpSession(api=TelegramAPIServer.from_base(settings.telegram_api_base))
+    elif settings.telegram_proxy:
+        from aiogram.client.session.aiohttp import AiohttpSession
+        session = AiohttpSession(proxy=settings.telegram_proxy)
+    return Bot(settings.bot_token, session=session)
+
+
 async def run_bot() -> None:
-    bot = Bot(settings.bot_token)
-    notifier.bot = bot
-    dispatcher = Dispatcher()
-    dispatcher.include_router(router)
+    bot = make_bot()
     try:
+        me = await bot.get_me(request_timeout=15)
+        notifier.bot = bot
+        status["bot"], status["bot_error"] = f"polling as @{me.username}", ""
         if settings.webapp_url.startswith("https://"):
             await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
                 text="Афиша", web_app=WebAppInfo(url=settings.webapp_url + "/")))
         await bot.delete_webhook(drop_pending_updates=False)
-        me = await bot.get_me()
-        status["bot"], status["bot_error"] = f"polling as @{me.username}", ""
         await dispatcher.start_polling(bot, handle_signals=False)
     finally:
         notifier.bot = None

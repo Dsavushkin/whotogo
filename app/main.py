@@ -73,7 +73,9 @@ async def diag():
            "webapp_url": settings.webapp_url}
     try:
         async with httpx.AsyncClient(timeout=6) as client:
-            out["telegram"] = (await client.get("https://api.telegram.org/")).status_code
+            base = settings.telegram_api_base or "https://api.telegram.org"
+            out["telegram_via"] = "relay" if settings.telegram_api_base else ("proxy" if settings.telegram_proxy else "direct")
+            out["telegram"] = (await client.get(base + "/")).status_code
     except Exception as error:
         out["telegram"] = f"{type(error).__name__}: {error}"[:200]
     return out

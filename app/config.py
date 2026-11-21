@@ -16,6 +16,11 @@ def _bool(name: str, default: bool = False) -> bool:
 class Settings:
     def __init__(self) -> None:
         self.bot_token: str = os.getenv("BOT_TOKEN", "").strip()
+        # Telegram is not reachable from many Russian data centres. Either a relay that forwards to
+        # https://api.telegram.org (TELEGRAM_API_BASE=https://relay.example.com) or a proxy
+        # (TELEGRAM_PROXY=http://user:pass@host:port).
+        self.telegram_api_base: str = os.getenv("TELEGRAM_API_BASE", "").strip().rstrip("/")
+        self.telegram_proxy: str = os.getenv("TELEGRAM_PROXY", "").strip()
         self.bot_username: str = os.getenv("BOT_USERNAME", "whotogo")
         # Public HTTPS address of the Mini App, e.g. https://whotogo.example.ru
         self.webapp_url: str = os.getenv("WEBAPP_URL", "").rstrip("/")
