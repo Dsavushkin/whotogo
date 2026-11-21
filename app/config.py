@@ -21,7 +21,7 @@ class Settings:
         # (TELEGRAM_PROXY=http://user:pass@host:port).
         self.telegram_api_base: str = os.getenv("TELEGRAM_API_BASE", "").strip().rstrip("/")
         self.telegram_proxy: str = os.getenv("TELEGRAM_PROXY", "").strip()
-        self.bot_username: str = os.getenv("BOT_USERNAME", "whotogo")
+        self.bot_username: str = os.getenv("BOT_USERNAME", "whotogobot")
         # Public HTTPS address of the Mini App, e.g. https://whotogo.example.ru
         self.webapp_url: str = os.getenv("WEBAPP_URL", "").rstrip("/")
         self.database_url: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./whotogo.db")

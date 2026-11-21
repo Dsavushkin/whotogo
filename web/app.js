@@ -7,7 +7,7 @@ const params = new URLSearchParams(location.search);
 const $app = document.getElementById('app');
 const $sheet = document.getElementById('sheet');
 const $toast = document.getElementById('toast');
-const state = { me: null, guest: false, dev: false, bot: 'whotogo', day: 'today', category: '', timer: null, token: 0, authMode: 'login' };
+const state = { me: null, guest: false, dev: false, bot: 'whotogobot', day: 'today', category: '', timer: null, token: 0, authMode: 'login' };
 const inTelegram = !!(tg && tg.initData);
 const store = {
   get token() { try { return localStorage.getItem('token') || ''; } catch (e) { return ''; } },

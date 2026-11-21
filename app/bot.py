@@ -196,6 +196,7 @@ async def run_bot() -> None:
         me = await bot.get_me(request_timeout=15)
         notifier.bot = bot
         status["bot"], status["bot_error"] = f"polling as @{me.username}", ""
+        settings.bot_username = me.username or settings.bot_username  # the real name, whatever .env says
         if settings.webapp_url.startswith("https://"):
             await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
                 text="Афиша", web_app=WebAppInfo(url=settings.webapp_url + "/")))

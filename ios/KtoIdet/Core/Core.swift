@@ -7,7 +7,7 @@ import Security
 enum Config {
     /// Server address. Change here when the service moves to its own domain.
     static let baseURL = URL(string: "https://111-88-80-60.sslip.io")!
-    static let bot = "whotogo"
+    static let bot = "whotogobot"
     static let cityTimeZone = TimeZone(identifier: "Europe/Moscow")!
 }
 
