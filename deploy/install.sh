@@ -4,9 +4,17 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if ! command -v docker >/dev/null; then
+if ! docker compose version >/dev/null 2>&1; then
   echo "== Ставлю Docker"
-  curl -fsSL https://get.docker.com | sh
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -q
+  # Пакеты Ubuntu доступны всегда; официальный установщик Docker — запасной вариант.
+  apt-get install -y -q docker.io docker-compose-v2 || curl -fsSL https://get.docker.com | sh
+fi
+if [ ! -f /etc/docker/daemon.json ]; then
+  # Зеркало на случай, если Docker Hub недоступен или режет скорость.
+  echo '{"registry-mirrors": ["https://mirror.gcr.io"]}' > /etc/docker/daemon.json
+  systemctl restart docker
 fi
 
 if [ ! -f .env ]; then
