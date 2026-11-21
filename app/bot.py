@@ -31,6 +31,8 @@ def is_admin(message: Message) -> bool:
 @router.message(CommandStart())
 async def start(message: Message, command: CommandObject):
     go = (command.args or "").strip()[:40]
+    if go == "login":  # opened from the iPhone app: send the sign-in code right away
+        return await login(message)
     markup = open_markup(go, "Открыть афишу")
     text = WELCOME if markup else WELCOME + "\n\nПриложение скоро откроется: адрес ещё настраивается."
     await message.answer(text, reply_markup=markup)
