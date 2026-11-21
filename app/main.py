@@ -78,6 +78,17 @@ async def diag():
             out["telegram"] = (await client.get(base + "/")).status_code
     except Exception as error:
         out["telegram"] = f"{type(error).__name__}: {error}"[:200]
+    if settings.telegram_proxy:
+        try:
+            import aiohttp
+            from aiohttp_socks import ProxyConnector
+
+            async with aiohttp.ClientSession(connector=ProxyConnector.from_url(settings.telegram_proxy),
+                                             timeout=aiohttp.ClientTimeout(total=8)) as http:
+                async with http.get("https://api.telegram.org/", allow_redirects=False) as response:
+                    out["telegram_via_proxy"] = response.status
+        except Exception as error:
+            out["telegram_via_proxy"] = f"{type(error).__name__}: {error}"[:200]
     return out
 
 
