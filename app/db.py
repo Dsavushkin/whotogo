@@ -20,7 +20,7 @@ async def init_db() -> None:
             # Local preview only: an old demo file is simply rebuilt.
             columns = [row[1] for row in (await conn.exec_driver_sql("PRAGMA table_info(users)")).all()]
             events = [row[1] for row in (await conn.exec_driver_sql("PRAGMA table_info(events)")).all()]
-            if (columns and "email" not in columns) or (events and "image" not in events):
+            if (columns and ("email" not in columns or "nudges" not in columns)) or (events and "image" not in events):
                 await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
         if engine.dialect.name == "postgresql":
@@ -31,6 +31,8 @@ async def init_db() -> None:
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(200) NOT NULL DEFAULT ''",
                 "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)",
                 "ALTER TABLE events ADD COLUMN IF NOT EXISTS image VARCHAR(500) NOT NULL DEFAULT ''",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS nudges BOOLEAN NOT NULL DEFAULT TRUE",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_nudge_at TIMESTAMP WITHOUT TIME ZONE",
             ):
                 await conn.exec_driver_sql(statement)
 

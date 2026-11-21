@@ -342,6 +342,7 @@ screens.profile = async () => {
       <section class="card"><div class="line" style="gap:14px">${ava(me, 'l')}<div class="col" style="gap:2px"><h2 class="strong" style="font-size:20px">${who(me)}</h2>${me.bio ? `<p class="small">${esc(me.bio)}</p>` : ''}</div></div>
         ${me.interests.length ? `<div class="tags">${me.interests.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
         <button class="btn soft small" data-go="profile/edit">Изменить</button></section>
+      ${me.has_telegram ? `<section class="card"><label class="check"><input type="checkbox" data-nudges ${me.nudges ? 'checked' : ''}><span><b>Напоминать перед выходными</b><br><span class="small muted">Пишем в бот в четверг, пятницу и субботу, если на выходные ничего не отмечено.</span></span></label></section>` : ''}
       <section class="card"><h2 class="strong" style="font-size:17px">Мои события</h2>${events ? `<div class="rows">${events}</div>` : '<p class="small muted">Отметьте «Иду» или «Ищу компанию» на событии, и оно появится здесь.</p>'}</section>
       ${me.is_organizer || me.is_admin
         ? '<button class="btn ink small" data-go="org">Кабинет организатора</button>'
@@ -542,6 +543,13 @@ document.addEventListener('click', async (event) => {
   if ('deleteYes' in d) {
     if (await act(() => api('DELETE', '/me'))) { store.token = ''; state.me = null; state.guest = !inTelegram; closeSheet(); history.replaceState(null, '', '#/'); render(); }
   }
+});
+
+document.addEventListener('change', async (event) => {
+  if (!event.target.matches('[data-nudges]')) return;
+  const on = event.target.checked;
+  const me = await act(() => api('PUT', '/me/settings', { nudges: on }));
+  if (me) { state.me = me; toast(on ? 'Будем напоминать перед выходными' : 'Напоминания выключены'); } else event.target.checked = !on;
 });
 
 document.addEventListener('submit', async (event) => {

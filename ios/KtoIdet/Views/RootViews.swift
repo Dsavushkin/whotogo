@@ -16,6 +16,7 @@ struct KtoIdetApp: App {
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -57,6 +58,9 @@ struct RootView: View {
         }
         .animation(.easeOut(duration: 0.2), value: model.toast)
         .task { await model.start() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { Task { await model.refreshNudges() } }
+        }
         .fullScreenCover(item: Binding(
             get: { model.matchToShow.map(MatchID.init) },
             set: { model.matchToShow = $0?.id }
@@ -115,6 +119,7 @@ struct MainTabs: View {
                 .tag(3)
         }
         .tint(.ink)
+        .task { await model.refreshNudges() }
     }
 }
 

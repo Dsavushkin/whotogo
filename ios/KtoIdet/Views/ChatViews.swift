@@ -327,6 +327,18 @@ struct ProfileView: View {
                     }
                 }
                 Card {
+                    Toggle(isOn: Binding(get: { model.me?.nudges ?? true },
+                                         set: { value in Task { await model.setNudges(value) } })) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Напоминать перед выходными").font(.ui(16, .heavy)).foregroundStyle(Color.ink)
+                            Text("В четверг, пятницу и субботу, если на выходные ничего не отмечено.")
+                                .font(.ui(13))
+                                .foregroundStyle(Color.muted)
+                        }
+                    }
+                    .tint(.cobalt)
+                }
+                Card {
                     Text("Мои события").font(.ui(17, .heavy)).foregroundStyle(Color.ink)
                     if upcoming.isEmpty {
                         Text("Отметьте «Иду» или «Ищу компанию» на событии, и оно появится здесь.")

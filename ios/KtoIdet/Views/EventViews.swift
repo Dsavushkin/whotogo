@@ -187,6 +187,8 @@ struct EventView: View {
             let _: StatusResponse = try await API.call("POST", "/events/\(eventId)/attend",
                                                        body: ["status": status, "note": String(note.prefix(200))])
             await load()
+            if status != "none" { await Nudges.askPermissionIfNeeded() }
+            await model.refreshNudges()
             return true
         } catch {
             model.say(error.localizedDescription)

@@ -60,6 +60,26 @@ async def login(message: Message):
     await message.answer(f"Код для входа в приложение: {code}\nДействует 10 минут. Никому его не сообщайте.")
 
 
+async def _set_nudges(message: Message, value: bool) -> None:
+    async with Session() as session:
+        user = (await session.execute(select(User).where(User.tg_id == message.from_user.id))).scalar_one_or_none()
+        if user:
+            user.nudges = value
+            await session.commit()
+    await message.answer("Хорошо, больше не буду напоминать перед выходными. Включить снова: /remind" if not value
+                         else "Буду напоминать в четверг, пятницу и субботу, если на выходные ничего не отмечено.")
+
+
+@router.message(Command("quiet"))
+async def quiet(message: Message):
+    await _set_nudges(message, False)
+
+
+@router.message(Command("remind"))
+async def remind(message: Message):
+    await _set_nudges(message, True)
+
+
 @router.message(Command("help"))
 async def help_(message: Message):
     text = "Откройте афишу кнопкой ниже. Вопросы и жалобы можно написать прямо сюда."

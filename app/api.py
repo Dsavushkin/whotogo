@@ -213,7 +213,7 @@ class ProfileIn(BaseModel):
 
 def me_card(me: User) -> dict:
     return {**user_card(me), "name": me.name, "adult_ok": me.adult_ok, "is_organizer": me.is_organizer,
-            "is_admin": settings.is_admin(me), "has_telegram": bool(me.tg_id)}
+            "is_admin": settings.is_admin(me), "has_telegram": bool(me.tg_id), "nudges": me.nudges}
 
 
 @router.get("/me")
@@ -230,6 +230,18 @@ async def put_me(body: ProfileIn, me: User = Depends(current_user), session: Asy
     me.name, me.age, me.bio = body.name.strip(), body.age, body.bio.strip()
     me.interests = [i.strip()[:24] for i in body.interests if i.strip()][:8]
     me.adult_ok = True
+    await session.commit()
+    return me_card(me)
+
+
+class SettingsIn(BaseModel):
+    nudges: bool
+
+
+@router.put("/me/settings")
+async def put_settings(body: SettingsIn, me: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
+    me = await session.merge(me)
+    me.nudges = body.nudges
     await session.commit()
     return me_card(me)
 

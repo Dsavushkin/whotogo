@@ -29,6 +29,9 @@ class User(Base):
     adult_ok: Mapped[bool] = mapped_column(Boolean, default=False)
     is_organizer: Mapped[bool] = mapped_column(Boolean, default=False)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
+    # «Куда идёте на выходных?» reminders; the person can turn them off.
+    nudges: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_nudge_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

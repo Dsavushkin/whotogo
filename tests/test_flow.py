@@ -314,3 +314,30 @@ async def test_obscene_message_is_rejected(people):
     match_id = (await anya.ok("POST", f"/events/{event_id}/invite/{vera.id}"))["match_id"]
     assert (await vera.call("POST", f"/matches/{match_id}/messages", json={"text": "ну ты и пиздабол"})).status_code == 400
     await vera.ok("POST", f"/matches/{match_id}/messages", json={"text": "Привет!"})
+
+
+async def test_weekend_nudges(people, client):
+    from datetime import datetime, timedelta, timezone
+    from app.db import Session
+    from app.jobs import send_weekend_nudges
+    from app.models import User
+    vera, anya, kirill = people
+    friday_evening = datetime(2026, 11, 27, 15, 30, tzinfo=timezone.utc)  # 18:30 in Moscow
+    async with Session() as session:
+        from app.models import Event
+        busy_event = Event(title="Квартирник", starts_at=datetime(2026, 11, 28, 17, 0), place="Чистые пруды")
+        tonight = Event(title="Винил-вечер", starts_at=datetime(2026, 11, 27, 17, 0), place="Лофт")
+        session.add_all([busy_event, tonight])
+        await session.commit()
+        busy_id, tonight_id = busy_event.id, tonight.id
+    await vera.ok("POST", f"/events/{busy_id}/attend", json={"status": "going"})  # has weekend plans
+    await anya.ok("PUT", "/me/settings", json={"nudges": False})                  # turned reminders off
+    notifier.sent.clear()
+
+    assert await send_weekend_nudges(datetime(2026, 11, 26, 9, 0, tzinfo=timezone.utc)) == 0   # Thursday morning
+    assert await send_weekend_nudges(datetime(2026, 11, 24, 15, 30, tzinfo=timezone.utc)) == 0  # Tuesday
+    assert await send_weekend_nudges(friday_evening) == 1
+    assert notifier.sent[0][0] == kirill.tg_id and "Пятница" in notifier.sent[0][1] and "Винил-вечер" in notifier.sent[0][1]
+    assert await send_weekend_nudges(friday_evening + timedelta(hours=1)) == 0   # once a day
+    assert await send_weekend_nudges(friday_evening + timedelta(hours=17)) == 1  # Saturday 11:30 again
+    assert (await kirill.ok("GET", "/me"))["nudges"] is True and (await anya.ok("GET", "/me"))["nudges"] is False

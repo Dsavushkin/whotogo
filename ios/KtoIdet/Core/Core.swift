@@ -33,6 +33,7 @@ struct Me: Codable, Hashable {
     var adultOk: Bool
     var isOrganizer: Bool
     var isAdmin: Bool
+    var nudges: Bool?
 
     var person: Person { Person(id: id, name: name, age: age, bio: bio, interests: interests) }
 }
@@ -322,7 +323,23 @@ final class AppModel {
         apply(me)
     }
 
+    /// «Куда идёте на выходных?» reminders on this iPhone.
+    func refreshNudges() async {
+        guard let me, me.adultOk else { return }
+        let mine: MyEvents? = try? await API.call("GET", "/my/events")
+        await Nudges.reschedule(enabled: me.nudges ?? true, upcoming: mine?.upcoming ?? [])
+    }
+
+    func setNudges(_ on: Bool) async {
+        if on { await Nudges.askPermissionIfNeeded() }
+        if let updated: Me = try? await API.call("PUT", "/me/settings", body: ["nudges": on]) {
+            me = updated
+        }
+        await refreshNudges()
+    }
+
     func signOut() async {
+        Nudges.cancel()
         let _: OkResponse? = try? await API.call("POST", "/auth/logout")
         Keychain.token = nil
         me = nil
@@ -332,6 +349,7 @@ final class AppModel {
 
     func deleteAccount() async throws {
         let _: OkResponse = try await API.call("DELETE", "/me")
+        Nudges.cancel()
         Keychain.token = nil
         me = nil
         tab = 0

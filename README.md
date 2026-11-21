@@ -60,7 +60,7 @@ apt-get update && apt-get install -y git && git clone https://github.com/Dsavush
 `/ban <id>`, `/unban <id>` · `/hide <id события>` · `/reports` — жалобы.
 Любое сообщение боту от пользователя пересылается администраторам.
 
-Для всех: `/login` — одноразовый код для входа в приложение вне Telegram (нужен будущему приложению для iPhone).
+Для всех: `/login` — одноразовый код для входа вне Telegram. `/quiet` и `/remind` — выключить и включить напоминания перед выходными.
 
 ## Приложение для iPhone (`ios/`)
 
