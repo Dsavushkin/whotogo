@@ -28,6 +28,7 @@ class Settings:
         # Anything that is not a number is ignored, so a typo here cannot stop the service.
         self.admin_ids: set[int] = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",")
                                     if x.isdigit()}
+        self.admin_emails: set[str] = {x.strip().lower() for x in os.getenv("ADMIN_EMAILS", "").split(",") if x.strip()}
         self.city: str = os.getenv("CITY", "msk")
         self.timezone: str = os.getenv("TIMEZONE", "Europe/Moscow")
         # DEV=1 lets requests sign in with the X-Dev-User header. Never enable in production.
@@ -41,6 +42,11 @@ class Settings:
         self.operator_name: str = os.getenv("OPERATOR_NAME", "")
         self.contact_email: str = os.getenv("CONTACT_EMAIL", "")
         self.init_data_max_age: int = int(_number("INIT_DATA_MAX_AGE", 24 * 3600))
+
+
+    def is_admin(self, user) -> bool:
+        return bool((user.tg_id and user.tg_id in self.admin_ids) or
+                    (user.email and user.email.lower() in self.admin_emails))
 
 
 settings = Settings()

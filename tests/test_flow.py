@@ -252,3 +252,40 @@ async def test_sign_in_with_code_from_bot(people, client):
     codes = [(await post("000000")).status_code for _ in range(9)]
     assert codes[-1] == 429 and 400 in codes  # guessing is cut off
     api._attempts.clear()
+
+
+async def test_site_account_and_public_afisha(client):
+    from app import api
+    api._attempts.clear()
+    event_id = await add_event(title="Открытый вечер")
+    # A guest sees the afisha and the event page, nothing more.
+    assert [e["title"] for e in (await client.get("/api/events", params={"day": "week"})).json()["events"]] == ["Открытый вечер"]
+    assert (await client.get(f"/api/events/{event_id}")).json()["my_status"] is None
+    assert (await client.get("/api/people")).status_code == 401
+    assert (await client.post(f"/api/events/{event_id}/attend", json={"status": "going"})).status_code == 401
+
+    account = {"email": "Vera@Example.com", "password": "correct horse"}
+    assert (await client.post("/api/auth/register", json={"email": "bad", "password": "correct horse"})).status_code == 422
+    assert (await client.post("/api/auth/register", json={**account, "password": "short"})).status_code == 422
+    token = (await client.post("/api/auth/register", json=account)).json()["token"]
+    assert (await client.post("/api/auth/register", json=account)).status_code == 400  # taken
+    bearer = {"Authorization": f"Bearer {token}"}
+    me = (await client.get("/api/me", headers=bearer)).json()
+    assert me["adult_ok"] is False and me["has_telegram"] is False
+    await client.put("/api/me", headers=bearer, json={"name": "Вера", "age": 28, "adult_ok": True})
+    assert (await client.post(f"/api/events/{event_id}/attend", headers=bearer, json={"status": "looking"})).status_code == 200
+
+    assert (await client.post("/api/auth/login", json={**account, "password": "wrong password"})).status_code == 400
+    again = (await client.post("/api/auth/login", json={"email": "vera@example.com", "password": "correct horse"})).json()["token"]
+    assert again != token and (await client.get("/api/me", headers={"Authorization": f"Bearer {again}"})).json()["name"] == "Вера"
+
+    # A match with a Telegram user: only the Telegram side gets a bot message, nothing breaks for the site user.
+    anya = await Person(client, 300, "Аня").join()
+    await anya.ok("POST", f"/events/{event_id}/attend", json={"status": "looking"})
+    await anya.ok("POST", f"/events/{event_id}/invite/{me['id']}")
+    notifier.sent.clear()
+    matched = (await client.post(f"/api/events/{event_id}/invite/{anya.id}", headers=bearer)).json()
+    assert matched["match_id"] and [s[0] for s in notifier.sent] == [anya.tg_id]
+    await anya.ok("POST", f"/matches/{matched['match_id']}/messages", json={"text": "Привет"})
+    assert len(notifier.sent) == 1
+    api._attempts.clear()

@@ -306,6 +306,14 @@ final class AppModel {
         apply(me)
     }
 
+    func signIn(email: String, password: String, signup: Bool) async throws {
+        let answer: TokenResponse = try await API.call("POST", signup ? "/auth/register" : "/auth/login",
+                                                       body: ["email": email, "password": password])
+        Keychain.token = answer.token
+        let me: Me = try await API.call("GET", "/me")
+        apply(me)
+    }
+
     func saveProfile(name: String, age: Int, bio: String, interests: [String]) async throws {
         let me: Me = try await API.call("PUT", "/me", body: [
             "name": name, "age": age, "bio": bio, "interests": interests, "adult_ok": true,

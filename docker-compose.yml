@@ -7,6 +7,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://whotogo:${POSTGRES_PASSWORD}@db:5432/whotogo
       WEBAPP_URL: https://${DOMAIN}
       DEV: "0"
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-da.savushkin4@gmail.com}
     depends_on:
       db:
         condition: service_healthy

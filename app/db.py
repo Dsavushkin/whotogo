@@ -16,7 +16,21 @@ async def init_db() -> None:
     from . import models  # noqa: F401  (registers tables)
 
     async with engine.begin() as conn:
+        if engine.dialect.name == "sqlite":
+            # Local preview only: an old demo file is simply rebuilt.
+            columns = [row[1] for row in (await conn.exec_driver_sql("PRAGMA table_info(users)")).all()]
+            if columns and "email" not in columns:
+                await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+        if engine.dialect.name == "postgresql":
+            # Changes to tables that already exist on the server. Each line is safe to repeat.
+            for statement in (
+                "ALTER TABLE users ALTER COLUMN tg_id DROP NOT NULL",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(120)",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(200) NOT NULL DEFAULT ''",
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)",
+            ):
+                await conn.exec_driver_sql(statement)
 
 
 async def get_session():

@@ -7,7 +7,12 @@ const params = new URLSearchParams(location.search);
 const $app = document.getElementById('app');
 const $sheet = document.getElementById('sheet');
 const $toast = document.getElementById('toast');
-const state = { me: null, bot: 'whotogo', day: 'today', category: '', timer: null, token: 0 };
+const state = { me: null, guest: false, dev: false, bot: 'whotogo', day: 'today', category: '', timer: null, token: 0, authMode: 'login' };
+const inTelegram = !!(tg && tg.initData);
+const store = {
+  get token() { try { return localStorage.getItem('token') || ''; } catch (e) { return ''; } },
+  set token(value) { try { value ? localStorage.setItem('token', value) : localStorage.removeItem('token'); } catch (e) { /* private mode */ } },
+};
 
 // ---------- helpers ----------
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -65,8 +70,9 @@ $sheet.addEventListener('click', (e) => { if (e.target === $sheet) closeSheet();
 // ---------- server ----------
 async function api(method, path, body) {
   const headers = { 'Content-Type': 'application/json' };
-  if (tg && tg.initData) headers.Authorization = 'tma ' + tg.initData;
-  else headers['X-Dev-User'] = params.get('dev') || localStorage.getItem('dev') || '1001';
+  if (inTelegram) headers.Authorization = 'tma ' + tg.initData;
+  else if (store.token) headers.Authorization = 'Bearer ' + store.token;
+  else if (state.dev && params.get('dev')) headers['X-Dev-User'] = params.get('dev');
   let response;
   try {
     response = await fetch('/api' + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
@@ -126,7 +132,9 @@ screens.afisha = async () => {
     </button>`)).join('');
   return `<div class="screen with-nav">
     <header class="head">
-      <div class="col" style="gap:2px"><span class="kicker">Москва</span><h1 class="display">${titles[state.day]}</h1></div>
+      <div class="between"><div class="col" style="gap:2px"><span class="kicker">Москва</span><h1 class="display">${titles[state.day]}</h1></div>
+        ${state.me ? '' : '<button class="chip" data-go="auth" style="background:var(--ink);color:#fff">Войти</button>'}</div>
+      ${state.me ? '' : '<p class="note">Афиша Москвы и компания на вечер. Отметьте «Ищу компанию» на событии и посмотрите, кто ещё идёт.</p>'}
       <div class="chips">${dayChip('today', 'Сегодня')}${dayChip('tomorrow', 'Завтра')}${dayChip('weekend', 'Выходные')}${dayChip('week', 'Неделя')}</div>
       <div class="chips">${catChip('', 'Всё')}${Object.entries(data.categories).filter(([id]) => id !== 'other').map(([id, label]) => catChip(id, label)).join('')}</div>
     </header>
@@ -281,6 +289,22 @@ async function sendMessage(text) {
   if (sent) { addMessages([sent]); const quick = document.querySelector('.compose .chips'); if (quick) quick.remove(); }
 }
 
+screens.auth = () => {
+  const signup = state.authMode === 'signup';
+  return `<div class="screen">
+    <header class="head"><div>${backBtn()}</div><span class="kicker">Кто идёт · афиша и компания на вечер</span>
+      <h1 class="display">${signup ? 'Новый аккаунт' : 'Вход'}</h1>
+      <p class="muted">${signup ? 'Нужен, чтобы отмечаться на событиях и писать тем, с кем интерес взаимный.' : 'Войдите, чтобы отмечаться на событиях и видеть, кто ищет компанию.'}</p></header>
+    <form class="body" id="auth" novalidate>
+      <label class="field"><span>Почта</span><input class="input" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" required placeholder="you@example.com"></label>
+      <label class="field"><span>Пароль</span><input class="input" name="password" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" required minlength="8" placeholder="${signup ? 'Не короче 8 символов' : 'Ваш пароль'}"></label>
+      <p class="error" id="error" role="alert" hidden></p>
+      <button class="btn ink">${signup ? 'Создать аккаунт' : 'Войти'}</button>
+      <button type="button" class="btn text" data-auth-mode="${signup ? 'login' : 'signup'}">${signup ? 'У меня уже есть аккаунт' : 'Создать аккаунт'}</button>
+      ${signup ? '<p class="small muted" style="text-align:center">Создавая аккаунт, вы принимаете <a href="/terms" target="_blank">соглашение</a> и <a href="/privacy" target="_blank">политику конфиденциальности</a>.</p>' : `<p class="small muted" style="text-align:center">Забыли пароль? Напишите нам, поможем: <a href="/privacy" target="_blank">контакты</a>.</p>`}
+    </form></div>`;
+};
+
 const INTERESTS = ['музыка', 'кино', 'театр', 'настолки', 'бары', 'еда', 'вино', 'прогулки', 'спорт', 'бег', 'йога', 'танцы', 'искусство', 'книги', 'путешествия', 'фотография', 'стендап', 'наука', 'языки', 'игры'];
 function profileForm(first) {
   const me = state.me, tgUser = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
@@ -315,6 +339,7 @@ screens.profile = async () => {
         ? '<button class="btn ink small" data-go="org">Кабинет организатора</button>'
         : `<section class="card"><h2 class="strong" style="font-size:17px">Проводите вечера?</h2><p class="small muted">Добавьте своё событие в афишу и узнайте, сколько гостей нашли компанию. Напишите боту, подключим кабинет.</p><button class="btn soft small" data-tg="https://t.me/${state.bot}">Написать</button></section>`}
       <p class="small" style="text-align:center"><a href="/terms" target="_blank">Соглашение</a> · <a href="/privacy" target="_blank">Конфиденциальность</a></p>
+      ${inTelegram ? '' : '<button class="btn text small" data-logout>Выйти</button>'}
       <button class="btn text small danger" data-delete>Удалить аккаунт</button>
     </main>${nav('profile')}</div>`;
 };
@@ -370,11 +395,21 @@ async function render() {
   closeSheet();
   const token = ++state.token;
   const [a, b, c] = route();
-  if (tg && tg.BackButton) { try { ROOT.includes(a || '') && !b ? tg.BackButton.hide() : tg.BackButton.show(); } catch (e) { /* old client */ } }
+  if (tg && tg.BackButton && inTelegram) { try { ROOT.includes(a || '') && !b ? tg.BackButton.hide() : tg.BackButton.show(); } catch (e) { /* old client */ } }
   let html;
   try {
-    if (!state.me) state.me = await api('GET', '/me');
-    if (!state.me.adult_ok) html = profileForm(true);
+    if (!state.me && !state.guest) {
+      try { state.me = await api('GET', '/me'); } catch (e) {
+        if (!e.auth) throw e;
+        store.token = '';
+        state.guest = true;
+      }
+    }
+    const open = !a || (a === 'event' && !c);  // pages a guest may see
+    if (!state.me && a === 'auth') html = screens.auth();
+    else if (!state.me && !open) { state.returnTo = [a, b, c].filter(Boolean).join('/'); history.replaceState(null, '', '#/auth'); html = screens.auth(); }
+    else if (state.me && a === 'auth') { history.replaceState(null, '', '#/'); html = await screens.afisha(); }
+    else if (state.me && !state.me.adult_ok) html = profileForm(true);
     else if (!a) html = await screens.afisha();
     else if (a === 'event' && c === 'people') html = await screens.eventPeople(b);
     else if (a === 'event') html = await screens.event(b);
@@ -387,8 +422,9 @@ async function render() {
     else if (a === 'org') html = b === 'new' ? await screens.orgNew() : b ? await screens.orgEvent(b) : await screens.org();
     else html = await screens.afisha();
   } catch (e) {
+    if (e.auth) { store.token = ''; state.me = null; state.guest = true; }
     html = e.auth
-      ? `<div class="screen"><main class="body" style="justify-content:center">${empty('Откройте в Telegram', 'Приложение работает внутри Telegram.', `<a class="btn ink small" href="https://t.me/${state.bot}">Открыть @${state.bot}</a>`)}</main></div>`
+      ? screens.auth()
       : `<div class="screen"><main class="body" style="justify-content:center">${empty('Не получилось загрузить', esc(e.message), '<button class="btn ink small" data-reload>Повторить</button><button class="btn text small" data-go="">На главную</button>')}</main></div>`;
   }
   if (token !== state.token) return;
@@ -412,6 +448,7 @@ document.addEventListener('click', async (event) => {
   if ('back' in d) return back();
   if ('close' in d) return closeSheet();
   if ('reload' in d) return render();
+  if (d.go === 'auth') state.returnTo = route().join('/');
   if ('go' in d) return route().join('/') === d.go ? render() : go(d.go);
   if ('replace' in d) { history.replaceState(null, '', '#/' + d.replace); return render(); }
   if (d.day) { state.day = d.day; return render(); }
@@ -423,6 +460,14 @@ document.addEventListener('click', async (event) => {
     if (!on && document.querySelectorAll('[data-interest][aria-pressed=true]').length >= 5) return toast('Можно выбрать до пяти');
     return el.setAttribute('aria-pressed', String(!on));
   }
+  if (d.authMode) { state.authMode = d.authMode; return render(); }
+  if ('logout' in d) {
+    await act(() => api('POST', '/auth/logout'));
+    store.token = ''; state.me = null; state.guest = true;
+    history.replaceState(null, '', '#/');
+    return render();
+  }
+  if ((d.attend || 'looking' in d) && !state.me) { state.returnTo = route().join('/'); return go('auth'); }
   if (d.attend) {
     const id = route()[1];
     if (await act(() => api('POST', `/events/${id}/attend`, { status: d.attend }))) { if (d.attend !== 'none') haptic(); render(); }
@@ -487,7 +532,7 @@ document.addEventListener('click', async (event) => {
       <button class="btn ink" data-delete-yes>Удалить всё</button><button class="btn text" data-close>Отмена</button>`);
   }
   if ('deleteYes' in d) {
-    if (await act(() => api('DELETE', '/me'))) { state.me = null; closeSheet(); history.replaceState(null, '', '#/'); render(); }
+    if (await act(() => api('DELETE', '/me'))) { store.token = ''; state.me = null; state.guest = !inTelegram; closeSheet(); history.replaceState(null, '', '#/'); render(); }
   }
 });
 
@@ -498,6 +543,20 @@ document.addEventListener('submit', async (event) => {
     const text = String(f.get('text'));
     form.reset();
     return sendMessage(text);
+  }
+  if (form.id === 'auth') {
+    const email = String(f.get('email')).trim(), password = String(f.get('password'));
+    const signup = state.authMode === 'signup';
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return formError('Проверьте адрес почты.');
+    if (password.length < 8) return formError(signup ? 'Пароль должен быть не короче 8 символов.' : 'Почта или пароль не подходят.');
+    try {
+      const answer = await api('POST', signup ? '/auth/register' : '/auth/login', { email, password });
+      store.token = answer.token;
+    } catch (e) { return formError(e.auth ? 'Почта или пароль не подходят.' : e.message); }
+    state.me = null; state.guest = false;
+    history.replaceState(null, '', '#/' + (state.returnTo && state.returnTo !== 'auth' ? state.returnTo : ''));
+    state.returnTo = '';
+    return render();
   }
   if (form.id === 'profile') {
     const first = !state.me.adult_ok, age = Number(f.get('age'));
@@ -545,8 +604,7 @@ async function start() {
       tg.disableVerticalSwipes && tg.disableVerticalSwipes();
     } catch (e) { /* older Telegram */ }
   }
-  if (params.get('dev')) localStorage.setItem('dev', params.get('dev'));
-  try { state.bot = (await (await fetch('/api/config')).json()).bot || state.bot; } catch (e) { /* default */ }
+  try { const config = await (await fetch('/api/config')).json(); state.bot = config.bot || state.bot; state.dev = !!config.dev; } catch (e) { /* default */ }
   const target = deepLink();
   if (target && !location.hash) {
     history.replaceState(null, '', '#/');

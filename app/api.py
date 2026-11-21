@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .auth import current_user, exchange_code, token_hash
+from .auth import (check_password, current_user, exchange_code, hash_password, maybe_user, new_token,
+                   token_hash)
 from .config import settings
 from .db import get_session
 from .models import Attendance, AuthToken, Block, Event, Like, LoginCode, Match, Message, Report, User, utcnow
@@ -138,16 +139,51 @@ _attempts: dict = {}  # ip -> recent attempt times; guards the 6-digit code agai
 
 @router.post("/auth/code")
 async def auth_code(body: CodeIn, request: Request, session: AsyncSession = Depends(get_session)):
-    ip, now = (request.client.host if request.client else "?"), time.monotonic()
-    recent = [t for t in _attempts.get(ip, []) if now - t < 600]
-    if len(recent) >= 8:
-        raise HTTPException(429, "Слишком много попыток. Попробуйте через 10 минут.")
-    _attempts[ip] = recent + [now]
+    key = _limit(request, "code", 8)
     token = await exchange_code(session, body.code)
     if token is None:
         raise HTTPException(400, "Код не подошёл. Получите новый: команда /login в боте.")
-    _attempts.pop(ip, None)
+    _attempts.pop(key, None)
     return {"token": token}
+
+
+class AccountIn(BaseModel):
+    email: str = Field(min_length=5, max_length=120, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    password: str = Field(min_length=8, max_length=200)
+
+
+def _limit(request: Request, bucket: str, most: int) -> str:
+    ip = request.client.host if request.client else "?"
+    key, now = f"{bucket}:{ip}", time.monotonic()
+    recent = [t for t in _attempts.get(key, []) if now - t < 600]
+    if len(recent) >= most:
+        raise HTTPException(429, "Слишком много попыток. Попробуйте через 10 минут.")
+    _attempts[key] = recent + [now]
+    return key
+
+
+@router.post("/auth/register")
+async def auth_register(body: AccountIn, request: Request, session: AsyncSession = Depends(get_session)):
+    _limit(request, "register", 6)
+    email = body.email.strip().lower()
+    if (await session.execute(select(User.id).where(User.email == email))).first():
+        raise HTTPException(400, "Эта почта уже зарегистрирована. Войдите с паролем.")
+    user = User(email=email, password_hash=await hash_password(body.password), city=settings.city)
+    session.add(user)
+    await session.commit()
+    return {"token": await new_token(session, user.id)}
+
+
+@router.post("/auth/login")
+async def auth_login(body: AccountIn, request: Request, session: AsyncSession = Depends(get_session)):
+    key = _limit(request, "login", 10)
+    user = (await session.execute(select(User).where(User.email == body.email.strip().lower()))).scalar_one_or_none()
+    if user is None or not await check_password(body.password, user.password_hash):
+        raise HTTPException(400, "Почта или пароль не подходят.")
+    if user.is_banned:
+        raise HTTPException(403, "Аккаунт заблокирован")
+    _attempts.pop(key, None)
+    return {"token": await new_token(session, user.id)}
 
 
 @router.post("/auth/logout")
@@ -170,8 +206,8 @@ class ProfileIn(BaseModel):
 
 
 def me_card(me: User) -> dict:
-    return {**user_card(me), "adult_ok": me.adult_ok, "is_organizer": me.is_organizer,
-            "is_admin": me.tg_id in settings.admin_ids}
+    return {**user_card(me), "name": me.name, "adult_ok": me.adult_ok, "is_organizer": me.is_organizer,
+            "is_admin": settings.is_admin(me), "has_telegram": bool(me.tg_id)}
 
 
 @router.get("/me")
@@ -213,10 +249,12 @@ async def delete_me(me: User = Depends(current_user), session: AsyncSession = De
 # ---------- events ----------
 
 @router.get("/events")
-async def list_events(day: str = "today", category: str = "", me: User = Depends(current_user),
+async def list_events(day: str = "today", category: str = "", me: Optional[User] = Depends(maybe_user),
                       session: AsyncSession = Depends(get_session)):
+    """Open to guests: the afisha is the public face of the site."""
     start, end = day_bounds(day)
-    query = select(Event).where(Event.published, Event.city == me.city, Event.starts_at >= start,
+    city = me.city if me else settings.city
+    query = select(Event).where(Event.published, Event.city == city, Event.starts_at >= start,
                                 Event.starts_at < end)
     if category:
         query = query.where(Event.category == category)
@@ -229,13 +267,14 @@ async def list_events(day: str = "today", category: str = "", me: User = Depends
 
 
 @router.get("/events/{event_id}")
-async def event_detail(event_id: int, me: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
+async def event_detail(event_id: int, me: Optional[User] = Depends(maybe_user),
+                       session: AsyncSession = Depends(get_session)):
     event = await get_event(session, event_id)
     counts = await counts_for(session, [event.id])
-    mine = await session.get(Attendance, (me.id, event.id))
+    mine = await session.get(Attendance, (me.id, event.id)) if me else None
     rows = await session.execute(
         select(User).join(Attendance, Attendance.user_id == User.id)
-        .where(Attendance.event_id == event.id, User.id != me.id).limit(5))
+        .where(Attendance.event_id == event.id, User.id != (me.id if me else 0)).limit(5))
     return {**event_card(event, *counts[event.id]), "description": event.description, "url": event.url,
             "source": event.source, "my_status": mine.status if mine else None,
             "my_note": mine.note if mine else "", "faces": [u.name[:1].upper() or "?" for u in rows.scalars()]}
@@ -491,14 +530,14 @@ class EventIn(BaseModel):
 
 
 def require_organizer(me: User) -> None:
-    if not (me.is_organizer or me.tg_id in settings.admin_ids):
+    if not (me.is_organizer or settings.is_admin(me)):
         raise HTTPException(403, "Доступ только для организаторов")
 
 
 async def my_event(session: AsyncSession, me: User, event_id: int) -> Event:
     require_organizer(me)
     event = await session.get(Event, event_id)
-    if event is None or (event.organizer_id != me.id and me.tg_id not in settings.admin_ids):
+    if event is None or (event.organizer_id != me.id and not settings.is_admin(me)):
         raise HTTPException(404, "Событие не найдено")
     return event
 

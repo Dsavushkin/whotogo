@@ -123,14 +123,17 @@ struct MainTabs: View {
 struct LoginView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
+    @State private var signup = false
+    @State private var email = ""
+    @State private var password = ""
     @State private var code = ""
+    @State private var useCode = false
     @State private var busy = false
     @State private var failure: String?
-    @FocusState private var focused: Bool
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 16) {
                 Text("Афиша и компания на вечер")
                     .font(.ui(13, .bold))
                     .foregroundStyle(Color.muted)
@@ -141,35 +144,66 @@ struct LoginView: View {
                     .font(.ui(16))
                     .foregroundStyle(Color.muted)
 
-                Card {
-                    Text("Вход через Telegram").font(.ui(17, .heavy)).foregroundStyle(Color.ink)
-                    Text("1. Откройте бота @\(Config.bot).\n2. Он пришлёт код из шести цифр.\n3. Введите код здесь.")
+                if useCode {
+                    Text("Откройте бота @\(Config.bot) в Telegram: он пришлёт код из шести цифр.")
                         .font(.ui(15))
                         .foregroundStyle(Color.ink)
                     Button("Получить код в Telegram") {
                         if let url = URL(string: "https://t.me/\(Config.bot)?start=login") { openURL(url) }
                     }
                     .buttonStyle(BigButtonStyle(fill: .cobalt, height: 52))
-                }
-
-                Field(title: "Код из бота") {
-                    TextField("000000", text: $code)
-                        .keyboardType(.numberPad)
-                        .textContentType(.oneTimeCode)
-                        .focused($focused)
-                        .onChange(of: code) { _, value in
-                            code = String(value.filter(\.isNumber).prefix(6))
-                        }
+                    Field(title: "Код из бота") {
+                        TextField("000000", text: $code)
+                            .keyboardType(.numberPad)
+                            .textContentType(.oneTimeCode)
+                            .onChange(of: code) { _, value in
+                                code = String(value.filter(\.isNumber).prefix(6))
+                            }
+                    }
+                } else {
+                    Field(title: "Почта") {
+                        TextField("you@example.com", text: $email)
+                            .keyboardType(.emailAddress)
+                            .textContentType(.username)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                    Field(title: "Пароль") {
+                        SecureField(signup ? "Не короче 8 символов" : "Ваш пароль", text: $password)
+                            .textContentType(signup ? .newPassword : .password)
+                    }
                 }
 
                 if let failure {
                     Text(failure).font(.ui(14, .bold)).foregroundStyle(Color.danger)
                 }
 
-                Button(busy ? "Входим…" : "Войти") { Task { await signIn() } }
+                Button(busy ? "Входим…" : (signup && !useCode ? "Создать аккаунт" : "Войти")) { Task { await submit() } }
                     .buttonStyle(BigButtonStyle())
-                    .disabled(busy || code.count != 6)
-                    .opacity(code.count == 6 ? 1 : 0.5)
+                    .disabled(busy)
+
+                if !useCode {
+                    Button(signup ? "У меня уже есть аккаунт" : "Создать аккаунт") {
+                        signup.toggle()
+                        failure = nil
+                    }
+                    .font(.ui(15, .bold))
+                    .foregroundStyle(Color.ink)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                Button(useCode ? "Войти по почте" : "Войти через Telegram") {
+                    useCode.toggle()
+                    failure = nil
+                }
+                .font(.ui(14, .bold))
+                .foregroundStyle(Color.muted)
+                .frame(maxWidth: .infinity, minHeight: 44)
+
+                if signup && !useCode {
+                    Text(markdown("Создавая аккаунт, вы принимаете [соглашение](\(Config.baseURL.absoluteString)/terms) и [политику конфиденциальности](\(Config.baseURL.absoluteString)/privacy)."))
+                        .font(.ui(13))
+                        .foregroundStyle(Color.muted)
+                }
             }
             .padding(20)
             .padding(.top, 24)
@@ -177,12 +211,25 @@ struct LoginView: View {
         .scrollDismissesKeyboard(.interactively)
     }
 
-    private func signIn() async {
-        busy = true
+    private func submit() async {
         failure = nil
-        focused = false
+        let mail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        if useCode {
+            guard code.count == 6 else { failure = "Введите шесть цифр из сообщения бота."; return }
+        } else {
+            guard mail.contains("@"), mail.contains(".") else { failure = "Проверьте адрес почты."; return }
+            guard password.count >= 8 else {
+                failure = signup ? "Пароль должен быть не короче 8 символов." : "Почта или пароль не подходят."
+                return
+            }
+        }
+        busy = true
         do {
-            try await model.signIn(code: code)
+            if useCode {
+                try await model.signIn(code: code)
+            } else {
+                try await model.signIn(email: mail, password: password, signup: signup)
+            }
         } catch {
             failure = error.localizedDescription
         }

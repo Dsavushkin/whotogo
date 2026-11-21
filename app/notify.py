@@ -24,8 +24,10 @@ class Notifier:
         self.sent: list = []  # (tg_id, text, go) – kept for tests
         self._last: dict = {}
 
-    async def send(self, tg_id: int, text: str, go: str = "", throttle_key: Optional[str] = None,
+    async def send(self, tg_id: Optional[int], text: str, go: str = "", throttle_key: Optional[str] = None,
                    throttle_seconds: int = 90) -> bool:
+        if not tg_id:  # a site user without Telegram: nothing to send yet
+            return False
         if throttle_key:
             key, now = (tg_id, throttle_key), time.monotonic()
             if now - self._last.get(key, -1e9) < throttle_seconds:

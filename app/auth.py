@@ -1,5 +1,6 @@
 """Sign-in with Telegram Mini App init data."""
 from typing import Optional
+import asyncio
 import hashlib
 import hmac
 import json
@@ -105,3 +106,45 @@ async def exchange_code(session: AsyncSession, code: str) -> Optional[str]:
     await session.delete(row)
     await session.commit()
     return token
+
+
+async def new_token(session: AsyncSession, user_id: int) -> str:
+    token = secrets.token_urlsafe(32)
+    session.add(AuthToken(token_hash=token_hash(token), user_id=user_id))
+    await session.commit()
+    return token
+
+
+def _scrypt(password: str, salt: bytes) -> bytes:
+    return hashlib.scrypt(password.encode(), salt=salt, n=2 ** 14, r=8, p=1, dklen=32)
+
+
+async def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = await asyncio.to_thread(_scrypt, password, salt)
+    return f"scrypt${salt.hex()}${digest.hex()}"
+
+
+async def check_password(password: str, stored: str) -> bool:
+    try:
+        kind, salt, digest = stored.split("$")
+        if kind != "scrypt":
+            return False
+        fresh = await asyncio.to_thread(_scrypt, password, bytes.fromhex(salt))
+    except ValueError:
+        return False
+    return hmac.compare_digest(fresh.hex(), digest)
+
+
+async def maybe_user(
+    authorization: str = Header(default=""),
+    x_dev_user: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> Optional[User]:
+    """The signed-in user, or None for a guest who only looks at the afisha."""
+    if not authorization and not (settings.dev and x_dev_user):
+        return None
+    try:
+        return await current_user(authorization, x_dev_user, session)
+    except HTTPException:
+        return None
