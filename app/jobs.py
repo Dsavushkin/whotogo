@@ -44,11 +44,12 @@ async def send_after_prompts(now_local_hour: int = -1) -> int:
 
 
 async def run_jobs() -> None:
-    last_import = 0.0
+    last_import = None  # the first import runs right after the start
     loop = asyncio.get_running_loop()
     while True:
         try:
-            if settings.timepad_token and loop.time() - last_import > settings.import_every_hours * 3600:
+            if settings.timepad_token and (
+                    last_import is None or loop.time() - last_import > settings.import_every_hours * 3600):
                 last_import = loop.time()
                 await run_import()
             await send_after_prompts()
