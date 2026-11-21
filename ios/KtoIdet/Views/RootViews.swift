@@ -390,7 +390,7 @@ struct AfishaView: View {
                     if data.events.isEmpty {
                         EmptyNote(title: "Пока пусто", text: "На эти даты событий нет. Посмотрите другие дни.")
                     }
-                    ForEach(Array(data.events.enumerated()), id: \.element.id) { index, event in
+                    ForEach(Array(ordered(data.events).enumerated()), id: \.element.id) { index, event in
                         NavigationLink(value: Route.event(event.id)) {
                             if index == 0 { HeroCard(event: event) } else { CompactCard(event: event) }
                         }
@@ -411,6 +411,16 @@ struct AfishaView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task(id: day + "|" + category) { await load() }
         .refreshable { await load() }
+    }
+
+    /// The big card on top goes to an event with a poster, if one is near the start of the list.
+    private func ordered(_ events: [EventCard]) -> [EventCard] {
+        guard let first = events.first else { return events }
+        var list = events
+        if let lead = list.prefix(12).firstIndex(where: { !($0.image ?? "").isEmpty && $0.looking == first.looking }), lead > 0 {
+            list.insert(list.remove(at: lead), at: 0)
+        }
+        return list
     }
 
     private var categories: [(String, String)] {

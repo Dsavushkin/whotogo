@@ -115,6 +115,9 @@ screens.afisha = async () => {
   const titles = { today: 'Куда сегодня?', tomorrow: 'Куда завтра?', weekend: 'Куда на выходных?', week: 'Куда на неделе?' };
   const dayChip = (id, label) => `<button class="chip" data-day="${id}" aria-pressed="${state.day === id}">${label}</button>`;
   const catChip = (id, label) => `<button class="chip small" data-category="${id}" aria-pressed="${state.category === id}">${label}</button>`;
+  // The big card on top goes to an event with a poster, if one is near the start of the list.
+  const lead = data.events.slice(0, 12).findIndex((e) => e.image && e.looking === (data.events[0] || {}).looking);
+  if (lead > 0) data.events.unshift(data.events.splice(lead, 1)[0]);
   const cards = data.events.map((e, i) => (i === 0 ? `
     <button class="hero" data-go="event/${e.id}">
       <div class="poster p0${e.image ? ' photo' : ''}"${bg(e.image)}>
