@@ -1,7 +1,10 @@
-.env
 *.db
-__pycache__/
+*.log
+.env
 .pytest_cache/
 .venv/
-*.log
+__pycache__/
 deploy/tunnel/
+ios/*.log
+ios/KtoIdet.xcodeproj/
+ios/build/

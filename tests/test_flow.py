@@ -293,3 +293,24 @@ async def test_site_account_and_public_afisha(client):
     await anya.ok("POST", f"/matches/{matched['match_id']}/messages", json={"text": "Привет"})
     assert len(notifier.sent) == 1
     api._attempts.clear()
+
+
+def test_moderation_filter():
+    from app.moderation import is_clean
+    for ok in ["Привет! Где встретимся?", "Иду на концерт, ребята", "Застрахуй себя от скуки — шучу", "Ребус", "Хлебушек",
+               "Небо", "Требую кофе", "Сабля", "Колбаса", "мандарин", "Скребок", "", "Hello, Scunthorpe"]:
+        assert is_clean(ok), ok
+    for bad in ["иди на х.у.й", "Пиздец", "ёбаный", "ебать", "БЛЯДЬ", "бля", "мудак", "fuck you", "х у й"]:
+        assert not is_clean(bad), bad
+
+
+async def test_obscene_message_is_rejected(people):
+    vera, anya, _ = people
+    event_id = await add_event()
+    await anya.ok("POST", f"/events/{event_id}/attend", json={"status": "looking"})
+    assert (await vera.call("POST", f"/events/{event_id}/attend", json={"status": "looking", "note": "все мудаки"})).status_code == 400
+    await vera.ok("POST", f"/events/{event_id}/attend", json={"status": "looking"})
+    await vera.ok("POST", f"/events/{event_id}/invite/{anya.id}")
+    match_id = (await anya.ok("POST", f"/events/{event_id}/invite/{vera.id}"))["match_id"]
+    assert (await vera.call("POST", f"/matches/{match_id}/messages", json={"text": "ну ты и пиздабол"})).status_code == 400
+    await vera.ok("POST", f"/matches/{match_id}/messages", json={"text": "Привет!"})

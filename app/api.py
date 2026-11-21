@@ -13,6 +13,7 @@ from .auth import (check_password, current_user, exchange_code, hash_password, m
                    token_hash)
 from .config import settings
 from .db import get_session
+from .moderation import is_clean
 from .models import Attendance, AuthToken, Block, Event, Like, LoginCode, Match, Message, Report, User, utcnow
 from .notify import notifier
 
@@ -195,6 +196,11 @@ async def auth_logout(authorization: str = Header(default=""), me: User = Depend
     return {"ok": True}
 
 
+def require_clean(*texts: str) -> None:
+    if not all(is_clean(t) for t in texts):
+        raise HTTPException(400, "Уберите грубые слова — такое здесь не публикуется.")
+
+
 # ---------- profile ----------
 
 class ProfileIn(BaseModel):
@@ -219,6 +225,7 @@ async def get_me(me: User = Depends(current_user)):
 async def put_me(body: ProfileIn, me: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
     if not body.adult_ok:
         raise HTTPException(400, "Нужно подтвердить возраст 18+ и согласие с правилами")
+    require_clean(body.name, body.bio, *body.interests)
     me = await session.merge(me)
     me.name, me.age, me.bio = body.name.strip(), body.age, body.bio.strip()
     me.interests = [i.strip()[:24] for i in body.interests if i.strip()][:8]
@@ -289,6 +296,7 @@ class AttendIn(BaseModel):
 async def attend(event_id: int, body: AttendIn, me: User = Depends(current_user),
                  session: AsyncSession = Depends(get_session)):
     require_adult(me)
+    require_clean(body.note)
     event = await get_event(session, event_id)
     mine = await session.get(Attendance, (me.id, event.id))
     if body.status == "none":
@@ -484,6 +492,7 @@ async def send_message(match_id: int, body: MessageIn, me: User = Depends(curren
     text = body.text.strip()
     if not text:
         raise HTTPException(400, "Пустое сообщение")
+    require_clean(text)
     message = Message(match_id=match.id, sender_id=me.id, text=text)
     session.add(message)
     await session.commit()
@@ -545,6 +554,7 @@ async def my_event(session: AsyncSession, me: User, event_id: int) -> Event:
 @router.post("/org/events")
 async def org_create(body: EventIn, me: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
     require_organizer(me)
+    require_clean(body.title, body.description, body.place)
     local = body.starts_at if body.starts_at.tzinfo else body.starts_at.replace(tzinfo=TZ)
     starts = local.astimezone(timezone.utc).replace(tzinfo=None)
     if starts < utcnow() - timedelta(hours=1):

@@ -191,13 +191,6 @@ struct LoginView: View {
                     .foregroundStyle(Color.ink)
                     .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                Button(useCode ? "Войти по почте" : "Войти через Telegram") {
-                    useCode.toggle()
-                    failure = nil
-                }
-                .font(.ui(14, .bold))
-                .foregroundStyle(Color.muted)
-                .frame(maxWidth: .infinity, minHeight: 44)
 
                 if signup && !useCode {
                     Text(markdown("Создавая аккаунт, вы принимаете [соглашение](\(Config.baseURL.absoluteString)/terms) и [политику конфиденциальности](\(Config.baseURL.absoluteString)/privacy)."))
