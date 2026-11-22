@@ -285,6 +285,29 @@ async def post_now(message: Message, command: CommandObject):
     await message.answer("Опубликовано." if done else "Не опубликовал: подходящих событий меньше трёх.")
 
 
+@router.message(Command("adpost"))
+async def ad_post(message: Message, command: CommandObject):
+    """/adpost <channel id or @name> [source] — publishes the ad post (picture + text) there,
+    e.g. to a channel whose post is then bought through Telega.in."""
+    if not is_admin(message):
+        return
+    parts = (command.args or "").split()
+    if not parts:
+        return await message.answer("Так: /adpost -100123456789 tg_telega")
+    target = int(parts[0]) if parts[0].lstrip("-").isdigit() else parts[0]
+    source = clean_source(parts[1] if len(parts) > 1 else "tg_telega") or "tg_telega"
+    picture = Path(__file__).resolve().parent.parent / "web" / "promo" / "ads" / "dark_1x1.jpg"
+    try:
+        sent = await message.bot.send_photo(target, FSInputFile(picture), parse_mode="HTML",
+                                            caption=texts.AD_POST.format(bot=settings.bot_username, source=source))
+    except Exception as error:
+        return await message.answer(f"Не получилось: {error}\nБот должен быть администратором канала.")
+    chat = sent.chat
+    link = (f"https://t.me/{chat.username}/{sent.message_id}" if chat.username
+            else f"https://t.me/c/{str(chat.id).removeprefix('-100')}/{sent.message_id}")
+    await message.answer(f"Опубликовано: {link}")
+
+
 async def channel_loop(bot: Bot) -> None:
     while True:
         try:
