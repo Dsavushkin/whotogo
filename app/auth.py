@@ -18,6 +18,19 @@ from .db import get_session
 from .models import AuthToken, LoginCode, User, utcnow
 
 
+def clean_source(value: str) -> str:
+    """«src_vk1» / «vk1» → «vk1»: letters, digits, - and _ only."""
+    value = (value or "").strip()
+    value = value[4:] if value.startswith("src_") else value
+    return "".join(ch for ch in value if ch.isascii() and (ch.isalnum() or ch in "-_"))[:32]
+
+
+def start_source(init_data: str) -> str:
+    from urllib.parse import parse_qs
+    param = (parse_qs(init_data).get("start_param") or [""])[0]
+    return clean_source(param) if param.startswith("src_") else ""
+
+
 def verify_init_data(init_data: str, bot_token: str, max_age: int, now: Optional[float] = None) -> Optional[dict]:
     """Returns the Telegram user dict if the signature is valid and fresh, else None."""
     if not init_data or not bot_token:
@@ -68,7 +81,8 @@ async def current_user(
     user = (await session.execute(select(User).where(User.tg_id == int(tg["id"])))).scalar_one_or_none()
     if user is None:
         user = User(tg_id=int(tg["id"]), name=str(tg.get("first_name", ""))[:64],
-                    username=str(tg.get("username", ""))[:64], city=settings.city)
+                    username=str(tg.get("username", ""))[:64], city=settings.city,
+                    source=start_source(authorization[4:]) if authorization.startswith("tma ") else "")
         session.add(user)
         await session.commit()
     elif tg.get("username") and tg["username"] != user.username:

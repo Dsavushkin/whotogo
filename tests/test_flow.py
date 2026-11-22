@@ -433,3 +433,18 @@ async def test_channel_posts(client):
     assert kind == "photo" and chat == "-100123" and "Куда сходить сегодня, 20 ноября" in text
     assert "Джаз &lt;вечер&gt;" in text and "startapp=event-" in text and text.count("квиз") + text.count("Квиз") == 2
     assert await channel.run_schedule(bot, now + timedelta(minutes=10)) == []  # once a day
+
+
+async def test_ad_sources(client):
+    from app.auth import clean_source, start_source
+    assert clean_source("src_vk-1") == "vk-1" and clean_source("tg<script>") == "tgscript"
+    assert start_source("query_id=1&start_param=src_tgchan1&auth_date=1") == "tgchan1"
+    assert start_source("start_param=event-5") == ""
+    token = (await client.post("/api/auth/register", json={"email": "ad@ex.ru", "password": "secret123",
+                                                          "source": "vk_ads"})).json()["token"]
+    from app.db import Session
+    from app.models import User
+    from sqlalchemy import select
+    async with Session() as session:
+        assert (await session.execute(select(User.source).where(User.email == "ad@ex.ru"))).scalar() == "vk_ads"
+    assert token

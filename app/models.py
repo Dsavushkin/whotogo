@@ -32,6 +32,8 @@ class User(Base):
     # «Куда идёте на выходных?» reminders; the person can turn them off.
     nudges: Mapped[bool] = mapped_column(Boolean, default=True)
     last_nudge_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Where the person came from: an ad link (?utm_source=…, ?start=src_…) — to compare ad channels.
+    source: Mapped[str] = mapped_column(String(32), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

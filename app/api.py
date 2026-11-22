@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .auth import (check_password, current_user, exchange_code, hash_password, maybe_user, new_token,
+from .auth import (check_password, clean_source, current_user, exchange_code, hash_password, maybe_user, new_token,
                    token_hash)
 from .config import settings
 from .db import get_session
@@ -151,6 +151,7 @@ async def auth_code(body: CodeIn, request: Request, session: AsyncSession = Depe
 class AccountIn(BaseModel):
     email: str = Field(min_length=5, max_length=120, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     password: str = Field(min_length=8, max_length=200)
+    source: str = Field(default="", max_length=64)
 
 
 def _limit(request: Request, bucket: str, most: int) -> str:
@@ -169,7 +170,8 @@ async def auth_register(body: AccountIn, request: Request, session: AsyncSession
     email = body.email.strip().lower()
     if (await session.execute(select(User.id).where(User.email == email))).first():
         raise HTTPException(400, "Эта почта уже зарегистрирована. Войдите с паролем.")
-    user = User(email=email, password_hash=await hash_password(body.password), city=settings.city)
+    user = User(email=email, password_hash=await hash_password(body.password), city=settings.city,
+                source=clean_source(body.source))
     session.add(user)
     await session.commit()
     return {"token": await new_token(session, user.id)}

@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import re
+from datetime import timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -12,7 +13,7 @@ from aiogram.types import (BotCommand, CallbackQuery, ChatMemberUpdated, FSInput
 from sqlalchemy import func, select
 
 from . import channel, texts
-from .auth import issue_login_code
+from .auth import clean_source, issue_login_code
 from .config import settings
 from .db import Session
 from .importer import run_import
@@ -38,9 +39,23 @@ def is_admin(message: Message) -> bool:
     return bool(message.from_user and message.from_user.id in settings.admin_ids)
 
 
+async def remember(message: Message, source: str = "") -> None:
+    """Everyone who starts the bot gets a profile, with the ad link they came from."""
+    tg = message.from_user
+    async with Session() as session:
+        user = (await session.execute(select(User).where(User.tg_id == tg.id))).scalar_one_or_none()
+        if user is None:
+            session.add(User(tg_id=tg.id, name=(tg.first_name or "")[:64], username=(tg.username or "")[:64],
+                             city=settings.city, source=source))
+            await session.commit()
+
+
 @router.message(CommandStart())
 async def start(message: Message, command: CommandObject):
     go = (command.args or "").strip()[:40]
+    await remember(message, clean_source(go) if go.startswith("src_") else "")
+    if go.startswith("src_"):
+        go = ""
     if go == "login":  # opened from the iPhone app: send the sign-in code right away
         return await login(message)
     if go:  # a link to a particular screen: open it straight away
@@ -148,8 +163,14 @@ async def stats(message: Message):
         looking = await count(Attendance, Attendance.status == "looking")
         marks = await count(Attendance)
         pairs = await count(Match)
+        week = utcnow() - timedelta(days=7)
+        sources = (await session.execute(
+            select(User.source, func.count()).where(User.created_at >= week).group_by(User.source)
+            .order_by(func.count().desc()))).all()
+    by_source = "\n".join(f"  {src or 'без метки'}: {n}" for src, n in sources) or "  —"
     await message.answer(f"Пользователей: {users} (с профилем: {ready})\nБудущих событий: {events}\n"
-                         f"Отметок «иду»: {marks}, из них ищут компанию: {looking}\nВзаимных пар: {pairs}")
+                         f"Отметок «иду»: {marks}, из них ищут компанию: {looking}\nВзаимных пар: {pairs}\n\n"
+                         f"Новые за 7 дней по источникам:\n{by_source}")
 
 
 @router.message(Command("import"))

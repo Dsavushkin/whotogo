@@ -445,6 +445,15 @@ async function render() {
 // ---------- actions ----------
 function formError(text) { const el = document.getElementById('error'); if (el) { el.textContent = text; el.hidden = !text; } }
 
+function adSource() {
+  try {
+    const fromUrl = new URLSearchParams(location.search).get('utm_source');
+    if (fromUrl && !localStorage.getItem('src')) localStorage.setItem('src', fromUrl.slice(0, 32));
+    return localStorage.getItem('src') || '';
+  } catch (err) { return ''; }
+}
+adSource();
+
 async function shareEvent(e) {
   if (!e) return;
   const text = `Пойдёшь со мной на «${e.title}»? ${when(e.starts_at, true)}`;
@@ -580,7 +589,7 @@ document.addEventListener('submit', async (event) => {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return formError('Проверьте адрес почты.');
     if (password.length < 8) return formError(signup ? 'Пароль должен быть не короче 8 символов.' : 'Почта или пароль не подходят.');
     try {
-      const answer = await api('POST', signup ? '/auth/register' : '/auth/login', { email, password });
+      const answer = await api('POST', signup ? '/auth/register' : '/auth/login', { email, password, source: adSource() });
       store.token = answer.token;
     } catch (e) { return formError(e.auth ? 'Почта или пароль не подходят.' : e.message); }
     state.me = null; state.guest = false;
