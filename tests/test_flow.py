@@ -341,3 +341,28 @@ async def test_weekend_nudges(people, client):
     assert await send_weekend_nudges(friday_evening + timedelta(hours=1)) == 0   # once a day
     assert await send_weekend_nudges(friday_evening + timedelta(hours=17)) == 1  # Saturday 11:30 again
     assert (await kirill.ok("GET", "/me"))["nudges"] is True and (await anya.ok("GET", "/me"))["nudges"] is False
+
+
+async def test_seo_pages(client):
+    from tests.conftest import add_event
+    event_id = await add_event(hours=30, title="Джаз в «Синей птице»", category="music", price="от 1 500 ₽",
+                               address="Малая Дмитровка, 23/15", description="Квартет\nи гости")
+    from app.seo import slugify
+    assert slugify("Джаз в «Синей птице»") == "dzhaz-v-siney-ptitse"
+
+    moved = await client.get(f"/e/{event_id}", follow_redirects=False)
+    assert moved.status_code == 301 and moved.headers["location"] == f"/e/{event_id}-dzhaz-v-siney-ptitse"
+    page = await client.get(moved.headers["location"])
+    assert page.status_code == 200
+    text = page.text
+    assert "<h1>Джаз в «Синей птице»</h1>" in text and '"@type": "Event"' in text and '"price": "1500"' in text
+    assert f'href="/#/event/{event_id}"' in text and "noindex" not in text
+    assert (await client.get("/e/99999")).status_code == 404
+
+    assert "Джаз" in (await client.get("/afisha/muzyka")).text
+    assert "Джаз" in (await client.get("/afisha")).text
+    assert (await client.get("/afisha/nepoyatno")).status_code == 404
+
+    sitemap = (await client.get("/sitemap.xml")).text
+    assert f"/e/{event_id}-dzhaz-v-siney-ptitse</loc>" in sitemap and "/afisha/vyhodnye</loc>" in sitemap
+    assert (await client.get("/robots.txt")).text == "User-agent: *\nDisallow: /\n"  # test host ≠ main domain

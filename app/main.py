@@ -11,6 +11,7 @@ from .api import router
 from .config import settings
 from .db import init_db
 from .notify import status
+from .seo import router as seo_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Кто идёт", lifespan=lifespan, docs_url="/api/docs" if settings.dev else None, redoc_url=None,
               openapi_url="/api/openapi.json" if settings.dev else None)
 app.include_router(router)
+app.include_router(seo_router)
 
 
 @app.get("/health")
