@@ -7,5 +7,6 @@ if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
   echo "$(date '+%F %T') обновляю до $(git rev-parse --short origin/main)"
   git reset -q --hard origin/main
   docker compose up -d --build
+  docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1 || true
   docker image prune -f >/dev/null
 fi
