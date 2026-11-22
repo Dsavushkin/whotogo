@@ -465,3 +465,9 @@ async def test_app_store_link(client):
 async def test_telegram_ad_link(client):
     moved = await client.get("/tg?s=tg_chtets&erid=2W5zFHWBHsG", follow_redirects=False)
     assert moved.status_code == 302 and moved.headers["location"] == "https://t.me/whotogobot?startapp=src_tg_chtets"
+
+
+async def test_telegram_ad_link_survives_marking(client):
+    for url in ("/tg/tg_telega", "/tg/tg_telega?erid=2W5zFHWBHsG", "/?erid=2W5zFHWBHsG/tg/tg_telega"):
+        moved = await client.get(url, follow_redirects=False)
+        assert moved.headers["location"] == "https://t.me/whotogobot?startapp=src_tg_telega", url

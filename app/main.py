@@ -1,10 +1,11 @@
 import asyncio
 import logging
+import re
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import router
@@ -124,6 +125,11 @@ async def terms():
 @app.middleware("http")
 async def no_stale_pages(request: Request, call_next):
     """Telegram keeps pages for a long time; make it re-check the Mini App files."""
+    if request.url.path in ("", "/") and "/tg/" in request.url.query:
+        # an ad platform glued its marking (?erid=…) in front of our path: …ru?erid=X/tg/<source>
+        found = re.search(r"/tg/([A-Za-z0-9_-]{1,32})", request.url.query)
+        if found:
+            return RedirectResponse(f"https://t.me/{settings.bot_username}?startapp=src_{found.group(1)}", 302)
     response = await call_next(request)
     if not request.url.path.startswith(("/api/", "/fonts/")):
         response.headers["Cache-Control"] = "no-cache"
