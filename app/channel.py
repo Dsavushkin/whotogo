@@ -7,6 +7,7 @@ the bot remembers the channel and posts on schedule:
 Buttons in channels cannot open a Mini App directly, so links use t.me/<bot>?startapp=event-<id>.
 """
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -22,6 +23,8 @@ log = logging.getLogger("whotogo.channel")
 # weekday (None = every day): (hour, kind)
 SCHEDULE = [(None, 11, "today"), (3, 19, "weekend")]
 TITLES = {"today": "Куда сходить сегодня", "weekend": "Куда сходить на выходных"}
+EMOJI = {"music": "🎷", "party": "🪩", "food": "🍷", "games": "🎲", "art": "🎨", "theater": "🎭", "cinema": "🎬",
+         "talk": "🎤", "sport": "🏃", "walk": "🚶", "dating": "💞", "other": "✨"}
 
 
 async def get_setting(key: str) -> str:
@@ -79,16 +82,25 @@ def post_text(kind: str, picks: list, now: Optional[datetime] = None) -> str:
     head = TITLES[kind]
     if kind == "today":
         head += f", {local_now.day} {texts.MONTHS[local_now.month - 1]}"
-    lines = [f"<b>{head}</b>", ""]
+    lines = [f"<b>{head}</b>"]
     for event, going, looking in picks:
         start = texts.local(event.starts_at)
-        time = f"{start:%H:%M}" if kind == "today" else f"{texts.WEEKDAYS[start.weekday()]} {start:%H:%M}"
-        place = f" · {texts.q(event.place)}" if event.place else ""
-        extra = f"\n    🙋 {looking} ищут компанию" if looking else ""
-        lines.append(f"▪️ <b>{time}</b> <a href=\"{app_link(f'event-{event.id}')}\">{texts.q(event.title)}</a>"
-                     f"{place}{extra}")
-    lines += ["", "Не с кем пойти? Откройте событие и нажмите «Ищу компанию» — увидите, кто ещё идёт."]
+        time = f"{start:%H:%M}" if kind == "today" else f"{texts.WEEKDAYS[start.weekday()]}, {start:%H:%M}"
+        title = event.title if len(event.title) <= 80 else event.title[:79].rsplit(" ", 1)[0] + "…"
+        place = f"\n📍 {texts.q(short_place(event.place))}" if event.place else ""
+        extra = f" · 🙋 {looking} ищут компанию" if looking else ""
+        lines.append(f"\n{EMOJI.get(event.category, '✨')} <a href=\"{app_link(f'event-{event.id}')}\">"
+                     f"<b>{texts.q(title)}</b></a>\n🕖 {time}{extra}{place}")
+    lines += ["", "Не с кем пойти? Нажмите на событие → «Ищу компанию» — и посмотрите, кто ещё идёт 👀"]
     return "\n".join(lines)
+
+
+def short_place(place: str) -> str:
+    return place if len(place) <= 50 else place[:49].rsplit(" ", 1)[0] + "…"
+
+
+def visible_length(html_text: str) -> int:
+    return len(re.sub(r"<[^>]+>", "", html_text).replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
 
 
 async def post(bot, kind: str, now: Optional[datetime] = None) -> bool:
@@ -106,13 +118,20 @@ async def post(bot, kind: str, now: Optional[datetime] = None) -> bool:
         [InlineKeyboardButton(text="Вся афиша", url=settings.webapp_url.rstrip("/") + "/afisha")],
     ])
     text = post_text(kind, picks, now)
-    poster = next((e.image for e, _, _ in picks if e.image), "")
-    if poster and len(text) <= 1000:
-        try:
-            await bot.send_photo(channel, poster, caption=text, parse_mode="HTML", reply_markup=keyboard)
-            return True
-        except Exception as error:  # the poster could not be fetched: post as text
-            log.warning("channel photo failed: %s", error)
+    while visible_length(text) > 1024 and len(picks) > 3:  # a photo caption holds 1024 characters
+        picks = picks[:-1]
+        text = post_text(kind, picks, now)
+    try:
+        from aiogram.types import BufferedInputFile
+
+        from . import cards
+        posters = await cards.fetch_posters([e.image for e, _, _ in picks[:4]])
+        picture = cards.render(kind, picks, posters, now)
+        await bot.send_photo(channel, BufferedInputFile(picture, f"{kind}.jpg"), caption=text, parse_mode="HTML",
+                             reply_markup=keyboard)
+        return True
+    except Exception as error:  # no picture this time: post as text
+        log.warning("channel picture failed: %s", error)
     await bot.send_message(channel, text, parse_mode="HTML", reply_markup=keyboard, link_preview_options=NO_PREVIEW)
     return True
 
