@@ -130,7 +130,7 @@ def page(title: str, description: str, path: str, body: str, *, image: str = "",
 
 def card(event: Event, looking: int = 0) -> str:
     poster = (f'<img src="{e(event.image)}" alt="" loading="lazy">' if event.image
-              else f'<span class="ph p{event.id % 4}">{e(CATEGORIES.get(event.category, "Другое"))}</span>')
+              else f'<span aria-hidden="true" class="ph p{event.id % 4}">{e(CATEGORIES.get(event.category, "Другое"))}</span>')
     company = f'<span class="tag">Ищут компанию: {looking}</span>' if looking else ""
     return (f'<a class="card" href="{event_path(event)}">{poster}<div><span class="cat">'
             f'{e(CATEGORIES.get(event.category, "Другое"))}</span><h3>{e(event.title)}</h3>'
@@ -237,7 +237,7 @@ async def listing(session: AsyncSession, path: str, h1: str, title: str, descrip
                                 Event.starts_at < end)
     if category:
         query = query.where(Event.category == category)
-    events = list((await session.execute(query.order_by(Event.starts_at).limit(120))).scalars())
+    events = list((await session.execute(query.order_by(Event.starts_at).limit(300))).scalars())
     counts = await counts_for(session, [x.id for x in events])
     if events:
         grid = '<div class="grid">' + "".join(card(x, counts[x.id][1]) for x in events) + "</div>"
