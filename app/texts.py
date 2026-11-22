@@ -166,12 +166,44 @@ def names_list(users) -> str:
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " и " + names[-1]
 
 
-def group_ready(others, event, seed: int = 0) -> str:
+def group_ready(others, event, seed: int = 0, captain=None, me_id: int = 0) -> str:
     first, _ = icebreaker_questions(event, seed)
     total = len(others) + 1
     return (f"👥 <b>Компания собрана!</b>\nНа «{q(event.title)}» ({when(event.starts_at)}) вас {total}: "
             f"вы, {names_list(others)}.\n\nПоздоровайтесь в общем чате и договоритесь, где встретиться.\n"
-            f"<i>Можно начать с вопроса: {q(first)}</i>")
+            f"<i>Можно начать с вопроса: {q(first)}</i>{captain_line(captain, me_id)}{deal_line(event)}")
+
+
+def captain_line(captain, me_id: int) -> str:
+    if captain is None:
+        return ""
+    if captain.id == me_id:
+        return ("\n\n⭐ <b>Вы капитан этой компании.</b> Предложите место встречи, встретьте всех у входа "
+                "и познакомьте друг с другом — дальше всё пойдёт само.")
+    return f"\n\n⭐ Капитан компании — {q(captain.name or 'Гость')}: опытный участник, встретит всех у входа."
+
+
+def deal_line(event) -> str:
+    if not getattr(event, "group_deal", ""):
+        return ""
+    text = f"\n\n🎟 <b>Скидка для компании:</b> {q(event.group_deal)}"
+    if getattr(event, "group_promo", ""):
+        text += f". Промокод — в чате компании"
+    return text
+
+
+def achievement(kind, level: int, value: int, fresh: int = 1) -> str:
+    title = kind.titles[level - 1]
+    text = f"🏆 <b>Новое достижение: {kind.emoji} {q(title)}</b>\nУ вас уже {value} {kind.name}."
+    if level < len(kind.levels):
+        text += f"\nСледующий уровень — «{q(kind.titles[level])}» за {kind.levels[level]}."
+    if fresh > 1:
+        text += f"\n\nВсего открыто сразу: {fresh}. Загляните в профиль."
+    return text
+
+
+def new_friend(friend) -> str:
+    return f"🤝 <b>{q(friend.name or 'Гость')}</b> теперь у вас в друзьях. Вы будете видеть, куда друг друга идёте."
 
 
 def group_joined(newcomer, event) -> str:

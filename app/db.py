@@ -24,7 +24,8 @@ async def init_db() -> None:
             if ((columns and ("email" not in columns or "nudges" not in columns)) or (events and "image" not in events)
                     or (marks and "reminded" not in marks) or (columns and "source" not in columns)
                     or (columns and "gender" not in columns) or (marks and "girls_only" not in marks)
-                    or (marks and "wants_group" not in marks)):
+                    or (marks and "wants_group" not in marks) or (columns and "invite_code" not in columns)
+                    or (events and "group_deal" not in events)):
                 await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
         if engine.dialect.name == "postgresql":
@@ -42,6 +43,12 @@ async def init_db() -> None:
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(1) NOT NULL DEFAULT ''",
                 "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS girls_only BOOLEAN NOT NULL DEFAULT FALSE",
                 "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS wants_group BOOLEAN NOT NULL DEFAULT FALSE",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_code VARCHAR(16) NOT NULL DEFAULT ''",
+                "CREATE INDEX IF NOT EXISTS ix_users_invite_code ON users (invite_code)",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS captain_ok BOOLEAN NOT NULL DEFAULT FALSE",
+                "ALTER TABLE events ADD COLUMN IF NOT EXISTS group_deal VARCHAR(120) NOT NULL DEFAULT ''",
+                "ALTER TABLE events ADD COLUMN IF NOT EXISTS group_promo VARCHAR(40) NOT NULL DEFAULT ''",
+                "ALTER TABLE groups ADD COLUMN IF NOT EXISTS captain_id INTEGER REFERENCES users(id)",
             ):
                 await conn.exec_driver_sql(statement)
 

@@ -35,6 +35,10 @@ class User(Base):
     last_nudge_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # Where the person came from: an ad link (?utm_source=…, ?start=src_…) — to compare ad channels.
     source: Mapped[str] = mapped_column(String(32), default="")
+    # Personal invite link code (t.me/<bot>?startapp=fr_<code>): whoever opens it becomes a friend.
+    invite_code: Mapped[str] = mapped_column(String(16), default="", index=True)
+    # Wants to lead companies: meets the others at the entrance and introduces everyone.
+    captain_ok: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -53,6 +57,9 @@ class Event(Base):
     address: Mapped[str] = mapped_column(String(300), default="")
     price: Mapped[str] = mapped_column(String(120), default="")
     url: Mapped[str] = mapped_column(String(500), default="")
+    # Group tickets: the organizer's offer for companies of the service, and the promo code for it.
+    group_deal: Mapped[str] = mapped_column(String(120), default="")
+    group_promo: Mapped[str] = mapped_column(String(40), default="")
     image: Mapped[str] = mapped_column(String(500), default="")  # poster from the organizer, may be empty
     city: Mapped[str] = mapped_column(String(16), default="msk", index=True)
     capacity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -155,6 +162,7 @@ class Group(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
     girls_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    captain_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -171,4 +179,20 @@ class GroupMessage(Base):
     group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"), index=True)
     sender_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     text: Mapped[str] = mapped_column(String(1000))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Friend(Base):
+    """Friends through the personal invite link. Stored both ways."""
+    __tablename__ = "friends"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    friend_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Achievement(Base):
+    """An achievement level a person reached (code like «events:2»); notified once."""
+    __tablename__ = "achievements"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

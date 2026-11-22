@@ -110,6 +110,9 @@ const empty = (title, text, action) => `<div class="empty"><h2 class="strong">${
 // ---------- screens ----------
 const screens = {};
 
+/** Small marks on an afisha card: friends who go and the group-ticket offer. */
+const extras = (e) => (e.friends || e.group_deal ? `<span class="marks">${e.friends ? `<span class="mark friends">👋 ${e.friends} ${plural(e.friends, 'друг', 'друга', 'друзей')}</span>` : ''}${e.group_deal ? `<span class="mark deal">🎟 ${esc(e.group_deal)}</span>` : ''}</span>` : '');
+
 screens.afisha = async () => {
   const data = await api('GET', `/events?day=${state.day}${state.category ? '&category=' + state.category : ''}`);
   const titles = { today: 'Куда сегодня?', tomorrow: 'Куда завтра?', weekend: 'Куда на выходных?', week: 'Куда на неделе?' };
@@ -128,6 +131,7 @@ screens.afisha = async () => {
         <p class="small semi muted">${esc([e.place, e.price].filter(Boolean).join(' · '))}</p>
         <div class="between"><span class="small semi">${e.going ? goingText(e.going) : 'Станьте первым гостем'}</span>
         ${e.looking ? `<span class="looking">${lookingText(e.looking)}</span>` : ''}</div>
+        ${extras(e)}
       </div>
     </button>` : `
     <button class="compact" data-go="event/${e.id}">
@@ -136,6 +140,7 @@ screens.afisha = async () => {
         <span class="tiny strong muted">${when(e.starts_at)}${e.price ? ' · ' + esc(e.price) : ''}</span>
         <h2>${esc(e.title)}</h2>
         ${e.looking ? `<span class="looking">${lookingText(e.looking)}</span>` : `<span class="small semi muted clip">${esc(e.place)}</span>`}
+        ${extras(e)}
       </span>
     </button>`)).join('');
   return `<div class="screen with-nav">
@@ -157,6 +162,8 @@ function companyCard(e) {
     return `<button class="card company ready" data-go="group/${e.group.id}">
       <span class="between"><span class="kicker">👥 Ваша компания</span><span class="badge ink">${e.group.size} ${plural(e.group.size, 'человек', 'человека', 'человек')}</span></span>
       <span class="line">${faces(e.group.others)}<span class="small semi clip">Вы${names ? ', ' + names : ''}</span></span>
+      ${e.group.captain_id ? `<span class="small semi">⭐ ${e.group.captain_id === state.me.id ? 'Вы капитан компании' : 'Капитан: ' + esc((e.group.others.find((p) => p.id === e.group.captain_id) || {}).name || '')}</span>` : ''}
+      ${e.group_deal ? `<span class="mark deal">🎟 ${esc(e.group_deal)} — промокод в чате</span>` : ''}
       <span class="btn lime small">Открыть чат компании</span></button>`;
   }
   if (e.started) return '';
@@ -171,6 +178,7 @@ function companyCard(e) {
     <span class="kicker">👥 Компания на вечер</span>
     <span class="strong" style="font-size:18px">Не хочется вдвоём с незнакомцем?</span>
     <span class="small semi">Соберём компанию из 3–5 человек, которые тоже идут, и откроем общий чат. С компанией проще и не похоже на свидание.</span>
+    ${e.group_deal ? `<span class="mark deal">🎟 Компании — ${esc(e.group_deal)}</span>` : ''}
     ${e.waiting_count ? `<span class="looking">Уже ждут: ${e.waiting_count}</span>` : ''}
     <button class="btn ink small" data-company="${e.id}">Соберите мне компанию</button></div>`;
 }
@@ -194,6 +202,7 @@ screens.event = async (id) => {
         <div class="fact"><span class="tiny strong muted">Билет</span><span class="semi">${esc(e.price || 'На сайте события')}</span></div>
       </div>
       ${e.description ? `<p>${esc(e.description)}</p>` : ''}
+      ${e.friends && e.friends.length ? `<div class="card friends-going"><span class="line"><span class="faces">${e.friends.slice(0, 4).map((p) => ava(p, 's')).join('')}</span><span class="small semi">👋 ${e.friends.length === 1 ? esc(e.friends[0].name) + ' тоже идёт' : 'Идут ваши друзья: ' + e.friends.map((p) => esc(p.name)).join(', ')}</span></span></div>` : ''}
       ${companyCard(e)}
       <button class="card" data-go="event/${e.id}/people">
         <span class="between"><h2 class="strong" style="font-size:17px">Кто идёт</h2><span class="looking">${e.going ? 'Все ' + e.going : ''}</span></span>
@@ -293,7 +302,7 @@ screens.chats = async () => {
     <main class="body">${prompts}${groups}${rows || (prompts || groups ? '' : empty('Чатов пока нет', 'Чат открывается, когда вы и другой гость оба нажали «Пойдём вместе».', '<button class="btn ink small" data-go="people">Кто ищет компанию</button>'))}</main>${nav('chats')}</div>`;
 };
 
-const bubble = (m) => `<p class="msg ${m.mine ? 'out' : 'in'}" data-id="${m.id}">${!m.mine && m.from ? `<b class="from">${esc(m.from)}</b>` : ''}${esc(m.text)}</p>`;
+const bubble = (m) => `<p class="msg ${m.mine ? 'out' : 'in'}" data-id="${m.id}">${!m.mine && m.from ? `<b class="from">${esc(m.from)}${state.chat && state.chat.group && state.chat.group.captain_id === m.from_id ? ' ⭐' : ''}</b>` : ''}${esc(m.text)}</p>`;
 screens.chat = async (id) => {
   const c = await api('GET', '/matches/' + id);
   state.chat = { id, base: '/matches/', last: c.messages.length ? c.messages[c.messages.length - 1].id : 0, other: c.other };
@@ -337,7 +346,7 @@ screens.group = async (id) => {
         <button class="round soft" data-group-menu="${c.id}" aria-label="Участники">${ICON.more}</button></div>
       <button class="chat-event" data-go="event/${c.event.id}" style="text-align:left"><span class="small strong">${esc(c.event.title)}</span><span class="small semi muted">${when(c.event.starts_at)}${c.event.place ? ' · ' + esc(c.event.place) : ''}</span></button>
     </header>
-    <main class="msgs" id="msgs"><p class="sys">Мы собрали компанию из тех, кто тоже идёт${c.girls_only ? ' — только девушки' : ''}. Договоритесь, где встретиться</p><p class="sys ice">💡 ${esc(c.icebreaker).replace(/\n/g, '<br>')}</p>${c.messages.map(bubble).join('')}</main>
+    <main class="msgs" id="msgs"><p class="sys">Мы собрали компанию из тех, кто тоже идёт${c.girls_only ? ' — только девушки' : ''}. Договоритесь, где встретиться</p>${c.captain_id ? `<p class="sys">⭐ ${c.captain_id === state.me.id ? 'Вы капитан: предложите место встречи и познакомьте всех' : 'Капитан компании — ' + esc((c.others.find((p) => p.id === c.captain_id) || {}).name || '') + ': встретит всех у входа'}</p>` : ''}${c.promo ? `<div class="sys deal-box"><span>🎟 <b>Скидка для вашей компании:</b> ${esc(c.deal)}</span><button class="chip small" data-copy="${esc(c.promo)}">Промокод ${esc(c.promo)} · скопировать</button></div>` : ''}<p class="sys ice">💡 ${esc(c.icebreaker).replace(/\n/g, '<br>')}</p>${c.messages.map(bubble).join('')}</main>
     <div class="compose">${quick}<form id="send"><label style="flex:1"><span hidden>Сообщение</span><input class="input round-input" name="text" placeholder="Сообщение компании" autocomplete="off" maxlength="1000" enterkeyhint="send"></label>
       <button class="round" style="background:var(--ink);color:#fff;width:52px;height:52px;border-radius:26px" aria-label="Отправить">${ICON.send}</button></form></div></div>`;
 };
@@ -395,14 +404,77 @@ function profileForm(first) {
 }
 screens.profileEdit = async () => profileForm(false);
 
+function achTile(a) {
+  const pct = a.next ? Math.min(100, Math.round((a.value / a.next) * 100)) : 100;
+  return `<button class="ach${a.level ? ' got' : ''}" data-ach="${a.code}"><span class="ach-emoji">${a.emoji}</span>
+    <span class="tiny strong clip">${esc(a.title)}</span><span class="ach-stars">${'★'.repeat(a.level)}${'☆'.repeat(a.levels - a.level)}</span>
+    <span class="bar"><i style="width:${pct}%"></i></span></button>`;
+}
+function achievementSheet(code) {
+  const a = (state.progress || { achievements: [] }).achievements.find((x) => x.code === code);
+  if (!a) return;
+  return sheet(`<div class="col" style="align-items:center;text-align:center;gap:6px"><span style="font-size:56px">${a.emoji}</span>
+      <h2 class="strong">${esc(a.level ? a.title : 'Ещё не открыто')}</h2>
+      <p class="small muted">${a.next ? `${a.value} из ${a.next} ${esc(a.unit)} до «${esc(a.next_title)}»` : `Высший уровень — ${a.value} ${esc(a.unit)}`}</p></div>
+    <div class="rows">${a.steps.map((s) => `<div class="rowline" style="cursor:default"><span style="font-size:20px">${s.done ? '★' : '☆'}</span><span class="semi" style="flex:1">${esc(s.title)}</span><span class="small semi muted">от ${s.need}</span></div>`).join('')}</div>
+    <p class="small muted">${esc(a.hint)}</p>
+    ${a.level ? `<button class="btn ink" data-ach-share="${a.code}">Поделиться</button>` : ''}
+    <button class="btn text" data-close>Закрыть</button>`);
+}
+function shareAchievement(code) {
+  const a = (state.progress || { achievements: [] }).achievements.find((x) => x.code === code);
+  if (!a || !a.level) return;
+  const inv = state.progress.invite;
+  const text = `${a.emoji} Моё достижение в «Кто идёт» — «${a.title}». Хожу на события в Москве с новыми людьми, присоединяйся`;
+  const picture = location.origin + `/ach/${a.code}-${a.level}.jpg`;
+  if (inTelegram && tg.shareToStory) {
+    try { closeSheet(); return tg.shareToStory(picture, { text: text + ' ' + inv.link }); } catch (err) { /* old client: share a link */ }
+  }
+  closeSheet();
+  return shareLink(inv.link, inv.web_link, text);
+}
+
+screens.achievements = async () => {
+  const p = state.progress = await api('GET', '/me/progress');
+  const got = p.achievements.filter((a) => a.level).length;
+  return `<div class="screen"><header class="head"><div>${backBtn()}</div><span class="kicker">Открыто ${got} из ${p.achievements.length}</span><h1 class="display">Достижения</h1></header>
+    <main class="body"><div class="ach-grid">${p.achievements.map(achTile).join('')}</div>
+    <p class="small muted" style="text-align:center">Нажмите на достижение, чтобы посмотреть уровни и поделиться в сторис.</p></main></div>`;
+};
+
+screens.friends = async () => {
+  const f = state.invite = await api('GET', '/friends');
+  const list = f.friends.map((p) => `<div class="rowline" style="cursor:default">${ava(p, 'm')}<span class="semi" style="flex:1">${who(p)}</span><button class="btn text small quiet" data-unfriend="${p.id}">Убрать</button></div>`).join('');
+  const going = f.going.map((g) => `<button class="rowline" data-go="event/${g.event.id}">${ava(g.friend, 'm')}<span class="col" style="gap:0;flex:1;min-width:0"><span class="semi clip">${esc(g.friend.name)} · ${esc(g.event.title)}</span><span class="small semi muted">${when(g.event.starts_at)}</span></span></button>`).join('');
+  return `<div class="screen"><header class="head"><div>${backBtn()}</div><h1 class="display">Друзья</h1>
+      <p class="muted">Друзья видят, куда вы идёте, и могут позвать вас в свою компанию. Добавить друга — отправить ему свою ссылку.</p></header>
+    <main class="body">
+      <button class="btn ink" data-invite-friends>Позвать друзей</button>
+      ${going ? `<section class="card"><h2 class="strong" style="font-size:17px">Куда идут друзья</h2><div class="rows">${going}</div></section>` : ''}
+      <section class="card"><h2 class="strong" style="font-size:17px">${f.friends.length ? 'Ваши друзья · ' + f.friends.length : 'Пока никого'}</h2>${list ? `<div class="rows">${list}</div>` : '<p class="small muted">Отправьте ссылку другу — как только он откроет её, вы станете друзьями.</p>'}</section>
+    </main></div>`;
+};
+
 screens.profile = async () => {
-  const me = state.me, mine = await api('GET', '/my/events');
+  const me = state.me;
+  const [mine, p] = await Promise.all([api('GET', '/my/events'), api('GET', '/me/progress')]);
+  state.progress = p;
+  const got = p.achievements.filter((a) => a.level);
+  const top = [...got, ...p.achievements.filter((a) => !a.level)].slice(0, 4);
+  const cap = p.captain;
+  const captainCard = cap.ready
+    ? `<section class="card"><label class="check"><input type="checkbox" data-captain ${cap.on ? 'checked' : ''}><span><b>⭐ Быть капитаном компаний</b><br><span class="small muted">Вы уже бывали на встречах. Капитан встречает компанию у входа и знакомит всех — так новичкам спокойнее.</span></span></label></section>`
+    : `<section class="card"><span class="strong">⭐ Капитан компании</span><span class="small muted">Станет доступно после ${cap.need} событий. Сейчас: ${cap.events} из ${cap.need}.</span><span class="bar"><i style="width:${Math.round((cap.events / cap.need) * 100)}%"></i></span></section>`;
   const events = mine.upcoming.map((e) => `<button class="rowline" data-go="event/${e.id}"><span class="col" style="gap:0;flex:1"><span class="strong clip">${esc(e.title)}</span><span class="small semi muted">${when(e.starts_at)} · ${e.my_status === 'looking' ? 'ищу компанию' : 'иду'}</span></span></button>`).join('');
   return `<div class="screen with-nav"><header class="head"><h1 class="display">Профиль</h1></header>
     <main class="body">
       <section class="card"><div class="line" style="gap:14px">${ava(me, 'l')}<div class="col" style="gap:2px"><h2 class="strong" style="font-size:20px">${who(me)}</h2>${me.bio ? `<p class="small">${esc(me.bio)}</p>` : ''}</div></div>
         ${me.interests.length ? `<div class="tags">${me.interests.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
         <button class="btn soft small" data-go="profile/edit">Изменить</button></section>
+      <section class="card"><span class="between"><h2 class="strong" style="font-size:17px">Достижения · ${got.length} из ${p.achievements.length}</h2><button class="btn text small" data-go="achievements" style="width:auto;padding:0">Все</button></span>
+        <div class="ach-grid">${top.map(achTile).join('')}</div></section>
+      <button class="card" data-go="friends" style="gap:4px"><span class="strong" style="font-size:17px">👋 Друзья →</span><span class="small semi muted">Позвать друзей и посмотреть, кто куда идёт</span></button>
+      ${captainCard}
       ${me.has_telegram ? `<section class="card"><label class="check"><input type="checkbox" data-nudges ${me.nudges ? 'checked' : ''}><span><b>Напоминать перед выходными</b><br><span class="small muted">Пишем в бот в четверг, пятницу и субботу, если на выходные ничего не отмечено.</span></span></label></section>` : ''}
       <section class="card"><h2 class="strong" style="font-size:17px">Мои события</h2>${events ? `<div class="rows">${events}</div>` : '<p class="small muted">Отметьте «Иду» или «Ищу компанию» на событии, и оно появится здесь.</p>'}</section>
       ${me.is_organizer || me.is_admin
@@ -451,7 +523,13 @@ screens.orgEvent = async (id) => {
         <div class="stat"><b>${s.checked_in}</b><span>уже на месте</span></div>
         <div class="stat"><b>${s.looking}</b><span>искали компанию</span></div>
         <div class="stat lime"><b>${s.pairs}</b><span>${plural(s.pairs, 'пара договорилась', 'пары договорились', 'пар договорились')}</span></div>
+        <div class="stat"><b>${s.companies}</b><span>${plural(s.companies, 'компания собралась', 'компании собрались', 'компаний собрались')}</span></div>
       </div>
+      <form class="card" id="deal" data-event="${id}" style="gap:10px"><h2 class="strong" style="font-size:16px">🎟 Групповые билеты</h2>
+        <p class="small" style="color:#A9ADBA">Скидка для компаний, которые мы собираем на ваше событие. Условие видно в афише, промокод — только участникам компании.</p>
+        <label class="field"><span>Условие</span><input class="input" name="group_deal" maxlength="120" value="${esc(s.event.group_deal)}" placeholder="−20% для компании от 3 человек"></label>
+        <label class="field"><span>Промокод</span><input class="input" name="group_promo" maxlength="40" value="${esc(s.event.group_promo || '')}" placeholder="KTOIDET20"></label>
+        <button class="btn lime small">Сохранить</button></form>
       <section class="card"><h2 class="strong" style="font-size:16px">Гости</h2>${guests ? `<div class="rows">${guests}</div>` : '<p class="small" style="color:#A9ADBA">Пока никто не отметился. Нажмите на гостя, когда он придёт.</p>'}</section>
       <p class="small" style="color:#A9ADBA">На следующий день гости получат вопрос «С кем хочется увидеться ещё?». Вы увидите только число взаимных отметок, без имён.</p>
     </main></div>`;
@@ -475,6 +553,7 @@ async function render() {
         state.guest = true;
       }
     }
+    if (state.me && state.me.adult_ok && !state.inviteDone) { state.inviteDone = true; useInvite(); }
     const open = !a || (a === 'event' && !c);  // pages a guest may see
     if (!state.me && a === 'auth') html = screens.auth();
     else if (!state.me && !open) { state.returnTo = [a, b, c].filter(Boolean).join('/'); history.replaceState(null, '', '#/auth'); html = screens.auth(); }
@@ -489,6 +568,8 @@ async function render() {
     else if (a === 'chats') html = await screens.chats();
     else if (a === 'chat') html = await screens.chat(b);
     else if (a === 'group') html = await screens.group(b);
+    else if (a === 'achievements') html = await screens.achievements();
+    else if (a === 'friends') html = await screens.friends();
     else if (a === 'profile') html = b === 'edit' ? await screens.profileEdit() : await screens.profile();
     else if (a === 'org') html = b === 'new' ? await screens.orgNew() : b ? await screens.orgEvent(b) : await screens.org();
     else html = await screens.afisha();
@@ -514,6 +595,14 @@ function adSource() {
   } catch (err) { return ''; }
 }
 adSource();
+
+async function shareLink(tgLink, webLink, text) {
+  if (inTelegram && tg.openTelegramLink) {
+    return tg.openTelegramLink('https://t.me/share/url?url=' + encodeURIComponent(tgLink) + '&text=' + encodeURIComponent(text));
+  }
+  if (navigator.share) { try { await navigator.share({ text, url: webLink }); } catch (err) { /* closed */ } return; }
+  try { await navigator.clipboard.writeText(text + ' ' + webLink); toast('Ссылка скопирована'); } catch (err) { toast(webLink); }
+}
 
 async function joinCompany(e, girlsOnly) {
   const res = await act(() => api('POST', `/events/${e.id}/attend`, { status: 'looking', note: e.my_note || '', group: true, girls_only: girlsOnly }));
@@ -576,13 +665,36 @@ document.addEventListener('click', async (event) => {
     const g = state.chat && state.chat.group;
     if (!g) return;
     return sheet(`<h2 class="strong">Компания</h2>
-      ${g.others.map((p) => `<div class="between">${ava(p, 'm')}<span class="semi" style="flex:1;margin-left:12px">${who(p)}</span><button class="btn text small quiet" data-report="${p.id}">Пожаловаться</button></div>`).join('')}
+      ${g.full ? '' : `<button class="btn ink" data-group-invite="${g.id}">Позвать друга в компанию</button>`}
+      ${g.others.map((p) => `<div class="between">${ava(p, 'm')}<span class="semi" style="flex:1;margin-left:12px">${who(p)}${g.captain_id === p.id ? ' ⭐' : ''}</span><button class="btn text small quiet" data-report="${p.id}">Пожаловаться</button></div>`).join('')}
       <button class="btn text danger" data-group-leave="${g.id}">Выйти из компании</button><button class="btn text" data-close>Закрыть</button>`);
   }
   if (d.groupLeave) {
     if (await act(() => api('POST', `/groups/${d.groupLeave}/leave`))) { closeSheet(); toast('Вы вышли из компании'); go('chats'); }
     return;
   }
+  if (d.groupInvite) {
+    const inv = await act(() => api('GET', `/groups/${d.groupInvite}/invite`));
+    if (!inv) return;
+    const e = state.chat && state.chat.group && state.chat.group.event;
+    closeSheet();
+    return shareLink(inv.link, inv.web_link, `Пойдём со мной${e ? ` на «${e.title}», ${when(e.starts_at, true).toLowerCase()}` : ''}? У нас уже собралась компания`);
+  }
+  if (d.copy) {
+    try { await navigator.clipboard.writeText(d.copy); toast('Скопировано'); } catch (err) { toast(d.copy); }
+    return;
+  }
+  if ('inviteFriends' in d) {
+    const f = state.invite;
+    if (f) shareLink(f.link, f.web_link, 'Я нахожу компанию на концерты, квизы и выставки в «Кто идёт». Добавляйся — будем видеть, кто куда идёт');
+    return;
+  }
+  if (d.unfriend) {
+    if (await act(() => api('DELETE', '/friends/' + d.unfriend))) render();
+    return;
+  }
+  if (d.ach) return achievementSheet(d.ach);
+  if (d.achShare) return shareAchievement(d.achShare);
   if ('gender' in d) {
     document.querySelectorAll('[data-gender]').forEach((b) => b.setAttribute('aria-pressed', String(b === el)));
     return;
@@ -672,6 +784,12 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('change', async (event) => {
+  if (event.target.matches('[data-captain]')) {
+    const on = event.target.checked;
+    const me = await act(() => api('PUT', '/me/settings', { captain_ok: on }));
+    if (me) { state.me = me; toast(on ? 'Теперь вы можете стать капитаном компании' : 'Капитанство выключено'); } else event.target.checked = !on;
+    return;
+  }
   if (!event.target.matches('[data-nudges]')) return;
   const on = event.target.checked;
   const me = await act(() => api('PUT', '/me/settings', { nudges: on }));
@@ -681,6 +799,12 @@ document.addEventListener('change', async (event) => {
 document.addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.target, f = new FormData(form);
+  if (form.id === 'deal') {
+    const body = { group_deal: String(f.get('group_deal')).trim(), group_promo: String(f.get('group_promo')).trim() };
+    if (body.group_deal && !body.group_promo) return toast('Добавьте промокод');
+    if (await act(() => api('PUT', `/org/events/${form.dataset.event}/deal`, body))) toast(body.group_deal ? 'Скидка включена' : 'Скидка выключена');
+    return;
+  }
   if (form.id === 'send') {
     const text = String(f.get('text'));
     form.reset();
@@ -736,7 +860,25 @@ function deepLink() {
   const target = params.get('go') || (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || '';
   const m = /^(chat|after|event|match|people|group)-(\d+)$/.exec(target);
   if (m) return m[1] === 'people' ? `event/${m[2]}/people` : `${m[1]}/${m[2]}`;
-  return target === 'org' ? 'org' : '';
+  return ['org', 'achievements', 'friends'].includes(target) ? target : '';
+}
+/** A friend's invite (t.me/<bot>?startapp=fr_<code>[_g<company>] or ?fr=<code>&g=<company>): kept until signed in. */
+function keepInvite() {
+  const sp = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || '';
+  const m = /^fr_([a-z0-9]{4,16})(?:_g(\d+))?$/i.exec(sp);
+  const code = m ? m[1] : params.get('fr'), group = m ? m[2] : params.get('g');
+  if (code) { try { localStorage.setItem('invite', JSON.stringify({ code, group: group ? Number(group) : null })); } catch (e) { /* private mode */ } }
+}
+keepInvite();
+async function useInvite() {
+  let invite;
+  try { invite = JSON.parse(localStorage.getItem('invite') || 'null'); localStorage.removeItem('invite'); } catch (e) { return; }
+  if (!invite) return;
+  try {
+    const res = await api('POST', '/friends/accept', invite);
+    if (res.group_id) { toast('Вы в компании друга'); return go('group/' + res.group_id); }
+    if (res.friend && res.new) toast(`${res.friend.name} теперь у вас в друзьях`);
+  } catch (e) { /* stale link */ }
 }
 async function start() {
   if (tg) {

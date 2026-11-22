@@ -8,7 +8,7 @@ from typing import Optional
 
 from sqlalchemy import func, or_, select
 
-from . import groups, texts
+from . import groups, progress, texts
 from .config import settings
 from .db import Session
 from .importer import run_import
@@ -165,6 +165,7 @@ async def run_jobs() -> None:
             await send_day_reminders()
             async with Session() as session:
                 await groups.assemble_upcoming(session)
+                await progress.award_recent(session)
         except asyncio.CancelledError:
             raise
         except Exception:

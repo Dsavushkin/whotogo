@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import texts
+from . import progress, texts
 from .api import SOON, blocked_ids, event_card, require_clean, to_local_iso, user_card
 from .auth import current_user
 from .db import get_session
@@ -112,25 +112,41 @@ async def assemble(session: AsyncSession, event: Event, now: Optional[datetime] 
                 session.add(GroupMember(group_id=group.id, user_id=user_id))
             members[group.id] = bucket
             created.append(group)
-    await session.commit()
 
+    # 3. A captain for each company that has none: someone experienced who agreed to lead.
     everyone: dict[int, User] = {u.id: u for _, u in waiting}
     async def person(user_id: int) -> Optional[User]:
         if user_id not in everyone:
             everyone[user_id] = await session.get(User, user_id)
         return everyone[user_id]
 
+    ready: dict[int, bool] = {}
+    for group in created + [g for g, _ in joined]:
+        if group.captain_id:
+            continue
+        for user_id in members[group.id]:
+            user = await person(user_id)
+            if user and user.captain_ok:
+                if user_id not in ready:
+                    ready[user_id] = await progress.captain_ready(session, user)
+                if ready[user_id]:
+                    group.captain_id = user_id
+                    break
+    await session.commit()
+
     for group in created:
         people = [await person(i) for i in members[group.id]]
+        captain = await person(group.captain_id) if group.captain_id else None
         for user in people:
             others = [p for p in people if p.id != user.id]
-            await notifier.send(user.tg_id, texts.group_ready(others, event, group.id), f"group-{group.id}",
-                                button="Открыть чат компании")
+            await notifier.send(user.tg_id, texts.group_ready(others, event, group.id, captain, user.id),
+                                f"group-{group.id}", button="Открыть чат компании")
     for group, user in joined:
         people = [await person(i) for i in members[group.id]]
         others = [p for p in people if p.id != user.id]
-        await notifier.send(user.tg_id, texts.group_ready(others, event, group.id), f"group-{group.id}",
-                            button="Открыть чат компании")
+        captain = await person(group.captain_id) if group.captain_id else None
+        await notifier.send(user.tg_id, texts.group_ready(others, event, group.id, captain, user.id),
+                            f"group-{group.id}", button="Открыть чат компании")
         for other in others:
             await notifier.send(other.tg_id, texts.group_joined(user, event), f"group-{group.id}",
                                 throttle_key=f"gj{group.id}", throttle_seconds=1800, button="Открыть чат")
@@ -159,7 +175,8 @@ async def group_status(session: AsyncSession, me: User, event: Event) -> dict:
     info: dict = {"group": None, "waiting": False, "waiting_count": 0}
     if group:
         people = [u for u in await members_of(session, group.id) if u.id != me.id and u.id not in hidden]
-        info["group"] = {"id": group.id, "size": len(people) + 1, "others": [user_card(u) for u in people]}
+        info["group"] = {"id": group.id, "size": len(people) + 1, "others": [user_card(u) for u in people],
+                         "captain_id": group.captain_id}
         return info
     placed = select(GroupMember.user_id).join(Group, Group.id == GroupMember.group_id).where(Group.event_id == event.id)
     info["waiting_count"] = await session.scalar(select(func.count()).select_from(Attendance).where(
@@ -174,6 +191,8 @@ async def group_status(session: AsyncSession, me: User, event: Event) -> dict:
 async def leave_group(session: AsyncSession, user_id: int, event_id: int) -> None:
     group = await my_group(session, user_id, event_id)
     if group:
+        if group.captain_id == user_id:
+            group.captain_id = None
         await session.execute(delete(GroupMember).where(GroupMember.group_id == group.id,
                                                         GroupMember.user_id == user_id))
 
@@ -220,6 +239,8 @@ async def group_chat(group_id: int, after: int = 0, me: User = Depends(current_u
     rows = (await session.execute(select(GroupMessage).where(GroupMessage.group_id == group.id, GroupMessage.id > after)
                                   .order_by(GroupMessage.id).limit(300))).scalars()
     return {"id": group.id, "event": event_card(event), "girls_only": group.girls_only,
+            "captain_id": group.captain_id if group.captain_id in names else None,
+            "deal": event.group_deal, "promo": event.group_promo, "full": len(people) >= LARGEST,
             "others": [user_card(u) for u in people if u.id != me.id],
             "icebreaker": texts.icebreaker_plain(event, group.id, group=True),
             "messages": [{"id": m.id, "mine": m.sender_id == me.id, "from": names.get(m.sender_id, "Гость"),
@@ -255,6 +276,8 @@ async def group_send(group_id: int, body: GroupMessageIn, me: User = Depends(cur
 async def group_leave(group_id: int, me: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
     group, event = await member_group(session, me, group_id)
     await session.execute(delete(GroupMember).where(GroupMember.group_id == group.id, GroupMember.user_id == me.id))
+    if group.captain_id == me.id:
+        group.captain_id = None
     mine = await session.get(Attendance, (me.id, event.id))
     if mine:
         mine.wants_group = False

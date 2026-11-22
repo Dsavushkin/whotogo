@@ -586,3 +586,90 @@ async def test_pair_is_enough_close_to_start(client):
     assert (await a.call("POST", f"/events/{late}/attend", json={"status": "looking", "group": True})).status_code == 200
     async with Session() as session:
         assert await assemble_upcoming(session) == 0
+
+
+async def visited(person, count, category="music"):
+    """Marks `count` past events for a person (as if they went)."""
+    for _ in range(count):
+        event = await add_event(hours=-5, category=category)
+        async with __import__("app.db", fromlist=["Session"]).Session() as session:
+            from app.models import Attendance
+            session.add(Attendance(user_id=person.id, event_id=event, status="going"))
+            await session.commit()
+
+
+async def test_captain(client):
+    a, b, c = await crowd(client, ["Капитан", "Боря", "Вика"])
+    assert (await a.call("PUT", "/me/settings", json={"captain_ok": True})).status_code == 400  # too early
+    await visited(a, 3)
+    info = await a.ok("GET", "/me/progress")
+    assert info["captain"]["ready"] is True
+    assert (await a.ok("PUT", "/me/settings", json={"captain_ok": True}))["captain_ok"] is True
+    event = await add_event(hours=10)
+    for person in (b, a, c):
+        await person.ok("POST", f"/events/{event}/attend", json={"status": "looking", "group": True})
+    page = await b.ok("GET", f"/events/{event}")
+    assert page["group"]["captain_id"] == a.id
+    ready = {s[0]: s[1] for s in notifier.sent if "Компания собрана" in s[1]}
+    assert "Вы капитан" in ready[a.tg_id] and "Капитан компании — Капитан" in ready[b.tg_id]
+    assert (await c.ok("GET", f"/groups/{page['group']['id']}"))["captain_id"] == a.id
+
+
+async def test_friends_and_company_invite(client):
+    a, b, c, d = await crowd(client, ["Аня", "Боря", "Вика", "Гоша"])
+    link = (await a.ok("GET", "/friends"))["link"]
+    code = link.split("fr_")[1]
+    res = await b.ok("POST", "/friends/accept", json={"code": code})
+    assert res["new"] is True and res["friend"]["name"] == "Аня"
+    assert any("теперь у вас в друзьях" in s[1] for s in notifier.sent if s[0] == a.tg_id)
+    assert [f["name"] for f in (await a.ok("GET", "/friends"))["friends"]] == ["Боря"]
+    # Where friends go: the afisha shows it.
+    event = await add_event(hours=10)
+    await b.ok("POST", f"/events/{event}/attend", json={"status": "going"})
+    assert (await a.ok("GET", "/events", params={"day": "week"}))["events"][0]["friends"] == 1
+    assert [f["name"] for f in (await a.ok("GET", f"/events/{event}"))["friends"]] == ["Боря"]
+    assert (await a.ok("GET", "/friends"))["going"][0]["event"]["id"] == event
+    # Invite a friend straight into my company.
+    for person in (a, c, d):
+        await person.ok("POST", f"/events/{event}/attend", json={"status": "looking", "group": True})
+    group = (await a.ok("GET", f"/events/{event}"))["group"]["id"]
+    invite = (await a.ok("GET", f"/groups/{group}/invite"))["link"]
+    assert invite.endswith(f"_g{group}")
+    joined = await b.ok("POST", "/friends/accept", json={"code": code, "group": group})
+    assert joined["group_id"] == group and joined["new"] is False
+    assert len((await a.ok("GET", f"/groups/{group}"))["others"]) == 3
+    # Achievement for the friend.
+    assert any(a_["code"] == "friends" and a_["level"] == 1 for a_ in (await a.ok("GET", "/me/progress"))["achievements"])
+
+
+async def test_achievements(client):
+    from app.db import Session
+    from app.progress import award_recent
+    (a,) = await crowd(client, ["Аня"])
+    await visited(a, 5, category="party")
+    async with Session() as session:
+        assert await award_recent(session) == 3  # events 1 and 5, night 3
+    note = [s for s in notifier.sent if s[0] == a.tg_id and "Новое достижение" in s[1]]
+    assert len(note) == 1 and "Завсегдатай" in note[0][1] and note[0][2] == "achievements"
+    async with Session() as session:
+        assert await award_recent(session) == 0  # only once
+    board = {x["code"]: x for x in (await a.ok("GET", "/me/progress"))["achievements"]}
+    assert board["events"]["level"] == 2 and board["events"]["next"] == 15 and board["night"]["level"] == 1
+    picture = await client.get("/ach/events-2.jpg")
+    assert picture.status_code == 200 and picture.headers["content-type"] == "image/jpeg"
+    assert (await client.get("/ach/events-9.jpg")).status_code == 404
+
+
+async def test_group_deal(client):
+    a, b, c = await crowd(client, ["Аня", "Боря", "Вика"])
+    admin = await Person(client, 1, "Админ").join()
+    event = await add_event(hours=10)
+    await admin.ok("PUT", f"/org/events/{event}/deal", json={"group_deal": "−20% для компании", "group_promo": "KTO20"})
+    assert (await a.ok("GET", "/events", params={"day": "week"}))["events"][0]["group_deal"] == "−20% для компании"
+    assert (await a.call("PUT", f"/org/events/{event}/deal", json={"group_deal": "x"})).status_code == 403
+    for person in (a, b, c):
+        await person.ok("POST", f"/events/{event}/attend", json={"status": "looking", "group": True})
+    assert any("Скидка для компании" in s[1] for s in notifier.sent)
+    group = (await a.ok("GET", f"/events/{event}"))["group"]["id"]
+    chat = await a.ok("GET", f"/groups/{group}")
+    assert chat["promo"] == "KTO20" and chat["deal"] == "−20% для компании"

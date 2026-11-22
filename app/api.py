@@ -14,8 +14,8 @@ from .auth import (check_password, clean_source, current_user, exchange_code, ha
 from .config import settings
 from .db import get_session
 from .moderation import is_clean
-from .models import (Attendance, AuthToken, Block, Event, GroupMember, GroupMessage, Like, LoginCode, Match, Message,
-                     Report, User, utcnow)
+from .models import (Achievement, Attendance, AuthToken, Block, Event, Friend, Group, GroupMember, GroupMessage, Like,
+                     LoginCode, Match, Message, Report, User, utcnow)
 from . import texts
 from .notify import notifier
 
@@ -81,6 +81,7 @@ def event_card(e: Event, going: int = 0, looking: int = 0) -> dict:
         "id": e.id, "title": e.title, "category": e.category, "category_name": CATEGORIES.get(e.category, "Другое"),
         "starts_at": to_local_iso(e.starts_at), "ends_at": to_local_iso(e.ends_at), "place": e.place,
         "address": e.address, "price": e.price, "image": e.image or "", "going": going, "looking": looking,
+        "group_deal": e.group_deal or "",
         "started": e.starts_at <= utcnow(),
     }
 
@@ -231,7 +232,8 @@ class ProfileIn(BaseModel):
 
 def me_card(me: User) -> dict:
     return {**user_card(me), "name": me.name, "adult_ok": me.adult_ok, "is_organizer": me.is_organizer,
-            "is_admin": settings.is_admin(me), "has_telegram": bool(me.tg_id), "nudges": me.nudges}
+            "is_admin": settings.is_admin(me), "has_telegram": bool(me.tg_id), "nudges": me.nudges,
+            "captain_ok": me.captain_ok}
 
 
 @router.get("/me")
@@ -257,13 +259,19 @@ async def put_me(body: ProfileIn, me: User = Depends(current_user), session: Asy
 
 
 class SettingsIn(BaseModel):
-    nudges: bool
+    nudges: Optional[bool] = None
+    captain_ok: Optional[bool] = None
 
 
 @router.put("/me/settings")
 async def put_settings(body: SettingsIn, me: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
     me = await session.merge(me)
-    me.nudges = body.nudges
+    if body.nudges is not None:
+        me.nudges = body.nudges
+    if body.captain_ok is not None:
+        if body.captain_ok and not await progress.captain_ready(session, me):
+            raise HTTPException(400, f"Капитаном можно стать после {progress.CAPTAIN_AFTER} событий")
+        me.captain_ok = body.captain_ok
     await session.commit()
     return me_card(me)
 
@@ -279,6 +287,9 @@ async def delete_me(me: User = Depends(current_user), session: AsyncSession = De
     await session.execute(delete(Like).where(or_(Like.from_id == me.id, Like.to_id == me.id)))
     await session.execute(delete(GroupMessage).where(GroupMessage.sender_id == me.id))
     await session.execute(delete(GroupMember).where(GroupMember.user_id == me.id))
+    await session.execute(update(Group).where(Group.captain_id == me.id).values(captain_id=None))
+    await session.execute(delete(Friend).where(or_(Friend.user_id == me.id, Friend.friend_id == me.id)))
+    await session.execute(delete(Achievement).where(Achievement.user_id == me.id))
     await session.execute(delete(Attendance).where(Attendance.user_id == me.id))
     await session.execute(delete(Block).where(or_(Block.user_id == me.id, Block.target_id == me.id)))
     await session.execute(delete(Report).where(Report.reporter_id == me.id))
@@ -303,7 +314,8 @@ async def list_events(day: str = "today", category: str = "", me: Optional[User]
         query = query.where(Event.category == category)
     events = list((await session.execute(query.order_by(Event.starts_at).limit(200))).scalars())
     counts = await counts_for(session, [e.id for e in events])
-    cards = [event_card(e, *counts.get(e.id, (0, 0))) for e in events]
+    friends = await friends_at(session, me, [e.id for e in events])
+    cards = [{**event_card(e, *counts.get(e.id, (0, 0))), "friends": len(friends.get(e.id, []))} for e in events]
     # Events where people already look for company go first, then by time.
     cards.sort(key=lambda c: (-c["looking"], c["starts_at"]))
     return {"events": cards, "categories": CATEGORIES}
@@ -321,7 +333,9 @@ async def event_detail(event_id: int, me: Optional[User] = Depends(maybe_user),
     return {**event_card(event, *counts[event.id]), "description": event.description, "url": event.url,
             "source": event.source, "my_status": mine.status if mine else None,
             "my_note": mine.note if mine else "", "my_girls_only": bool(mine and mine.girls_only),
-            **await group_status(session, me, event), "faces": [u.name[:1].upper() or "?" for u in rows.scalars()]}
+            **await group_status(session, me, event),
+            "friends": [user_card(u) for u in (await friends_at(session, me, [event.id])).get(event.id, [])],
+            "faces": [u.name[:1].upper() or "?" for u in rows.scalars()]}
 
 
 class AttendIn(BaseModel):
@@ -614,6 +628,8 @@ class EventIn(BaseModel):
     price: str = Field(default="", max_length=60)
     url: str = Field(default="", max_length=300)
     capacity: Optional[int] = Field(default=None, ge=1, le=100000)
+    group_deal: str = Field(default="", max_length=120)  # «−20% для компании от 3 человек»
+    group_promo: str = Field(default="", max_length=40)
 
 
 def require_organizer(me: User) -> None:
@@ -642,7 +658,8 @@ async def org_create(body: EventIn, me: User = Depends(current_user), session: A
     event = Event(source="org", title=body.title.strip(), description=body.description.strip(),
                   category=body.category if body.category in CATEGORIES else "other", starts_at=starts,
                   place=body.place.strip(), address=body.address.strip(), price=body.price.strip(),
-                  url=body.url.strip(), capacity=body.capacity, organizer_id=me.id, city=me.city)
+                  url=body.url.strip(), capacity=body.capacity, organizer_id=me.id, city=me.city,
+                  group_deal=body.group_deal.strip(), group_promo=body.group_promo.strip())
     session.add(event)
     await session.commit()
     return event_card(event)
@@ -664,11 +681,29 @@ async def org_stats(event_id: int, me: User = Depends(current_user), session: As
         select(User, Attendance).join(Attendance, Attendance.user_id == User.id)
         .where(Attendance.event_id == event.id).order_by(Attendance.created_at))).all()
     pairs = (await session.execute(select(func.count()).select_from(Match).where(Match.event_id == event.id))).scalar()
-    return {"event": {**event_card(event), "capacity": event.capacity},
+    companies = (await session.execute(select(func.count()).select_from(Group).where(Group.event_id == event.id))).scalar()
+    return {"event": {**event_card(event), "capacity": event.capacity, "group_promo": event.group_promo},
+            "companies": companies or 0,
             "going": len(rows), "looking": sum(1 for _, a in rows if a.status == "looking"),
             "checked_in": sum(1 for _, a in rows if a.checked_in),
             "pairs": pairs or 0,  # a number only: who matched with whom stays private
             "guests": [{"id": u.id, "name": u.name, "checked_in": a.checked_in} for u, a in rows]}
+
+
+class DealIn(BaseModel):
+    group_deal: str = Field(default="", max_length=120)
+    group_promo: str = Field(default="", max_length=40)
+
+
+@router.put("/org/events/{event_id}/deal")
+async def org_deal(event_id: int, body: DealIn, me: User = Depends(current_user),
+                   session: AsyncSession = Depends(get_session)):
+    """Group tickets: an offer for companies of the service. Empty text turns it off."""
+    event = await my_event(session, me, event_id)
+    require_clean(body.group_deal, body.group_promo)
+    event.group_deal, event.group_promo = body.group_deal.strip(), body.group_promo.strip()
+    await session.commit()
+    return {"group_deal": event.group_deal, "group_promo": event.group_promo}
 
 
 @router.post("/org/events/{event_id}/checkin/{user_id}")
@@ -684,3 +719,5 @@ async def org_checkin(event_id: int, user_id: int, me: User = Depends(current_us
 
 
 from .groups import assemble, group_status, leave_group  # noqa: E402  (groups.py builds on the helpers above)
+from . import progress  # noqa: E402
+from .social import friends_at  # noqa: E402

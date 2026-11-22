@@ -285,6 +285,28 @@ async def post_now(message: Message, command: CommandObject):
     await message.answer("Опубликовано." if done else "Не опубликовал: подходящих событий меньше трёх.")
 
 
+@router.message(Command("deal"))
+async def deal(message: Message, command: CommandObject):
+    """/deal <id события> <ПРОМОКОД> <условие> — групповые билеты; /deal <id> off — выключить."""
+    if not is_admin(message):
+        return
+    parts = (command.args or "").split(maxsplit=2)
+    if not parts or not parts[0].isdigit() or (len(parts) < 3 and parts[1:] != ["off"]):
+        return await message.answer("Так: /deal 123 KTOIDET20 −20% для компании от 3 человек\nВыключить: /deal 123 off")
+    async with Session() as session:
+        event = await session.get(Event, int(parts[0]))
+        if event is None:
+            return await message.answer("Нет такого события.")
+        if parts[1] == "off":
+            event.group_deal, event.group_promo = "", ""
+        else:
+            event.group_promo, event.group_deal = parts[1][:40], parts[2][:120]
+        await session.commit()
+        await message.answer(f"«{texts.q(event.title)}»: " + (f"скидка компаниям — {texts.q(event.group_deal)}, "
+                             f"промокод {texts.q(event.group_promo)}" if event.group_deal else "скидка выключена"),
+                             parse_mode="HTML")
+
+
 @router.message(Command("adpost"))
 async def ad_post(message: Message, command: CommandObject):
     """/adpost <channel id or @name> [source] — publishes the ad post (picture + text) there,
