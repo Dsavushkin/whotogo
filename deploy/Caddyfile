@@ -1,4 +1,8 @@
-{$DOMAIN} {
+kompaniyana.ru, 111-88-80-60.sslip.io {
 	encode gzip
 	reverse_proxy app:8000
+}
+
+www.kompaniyana.ru {
+	redir https://kompaniyana.ru{uri} permanent
 }
