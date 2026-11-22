@@ -508,3 +508,81 @@ async def test_icebreaker(people):
     lines = [line[2:] for line in chat["icebreaker"].split("\n") if line.startswith("— ")]
     assert len(lines) == 2 and all(q in texts.ICEBREAKERS["cinema"] for q in lines)
     assert "Можно начать с вопроса" in notifier.sent[-1][1]
+
+
+async def crowd(client, names, start=300):
+    return [await Person(client, start + i, name).join() for i, name in enumerate(names)]
+
+
+async def test_groups(client):
+    a, b, c, d, e = await crowd(client, ["Аня", "Боря", "Вика", "Гоша", "Даша"])
+    event = await add_event(hours=10, category="music")
+    want = {"status": "looking", "group": True}
+    first = await a.ok("POST", f"/events/{event}/attend", json=want)
+    assert first["waiting"] is True and first["group"] is None
+    await b.ok("POST", f"/events/{event}/attend", json=want)
+    assert notifier.sent == [] or all("Компания собрана" not in s[1] for s in notifier.sent)
+    third = await c.ok("POST", f"/events/{event}/attend", json=want)
+    assert third["group"]["size"] == 3
+    ready = [s for s in notifier.sent if "Компания собрана" in s[1]]
+    assert len(ready) == 3 and {s[2] for s in ready} == {f"group-{third['group']['id']}"}
+    group = third["group"]["id"]
+
+    # A newcomer joins the existing company; the others hear about it.
+    notifier.sent.clear()
+    fourth = await d.ok("POST", f"/events/{event}/attend", json=want)
+    assert fourth["group"]["id"] == group and fourth["group"]["size"] == 4
+    assert sum("присоединяется" in s[1] for s in notifier.sent) == 3
+
+    # Shared chat with an icebreaker; the others get the message.
+    chat = await a.ok("GET", f"/groups/{group}")
+    assert len(chat["others"]) == 3 and chat["icebreaker"]
+    notifier.sent.clear()
+    await a.ok("POST", f"/groups/{group}/messages", json={"text": "Привет всем! Встречаемся у входа?"})
+    assert len(notifier.sent) == 3
+    seen = await b.ok("GET", f"/groups/{group}")
+    assert seen["messages"][0]["from"] == "Аня" and not seen["messages"][0]["mine"]
+    assert (await b.ok("GET", "/groups"))["groups"][0]["last_from"] == "Аня"
+    assert (await e.call("GET", f"/groups/{group}")).status_code == 404  # not a member
+
+    # The event page shows the company; leaving drops the wish too.
+    page = await a.ok("GET", f"/events/{event}")
+    assert page["group"]["size"] == 4
+    await d.ok("POST", f"/groups/{group}/leave")
+    page = await d.ok("GET", f"/events/{event}")
+    assert page["group"] is None and page["waiting"] is False
+    # «Иду» without company also leaves the group.
+    await c.ok("POST", f"/events/{event}/attend", json={"status": "going"})
+    assert len((await a.ok("GET", f"/groups/{group}"))["others"]) == 1
+
+
+async def test_groups_respect_girls_only_and_blocks(client):
+    people = await crowd(client, ["Ира", "Катя", "Лена", "Миша", "Нина", "Олег"])
+    ira, katya, lena, misha, nina, oleg = people
+    for person, gender in zip(people, "fffmfm"):
+        await person.ok("PUT", "/me", json={"name": person.name, "age": 28, "gender": gender, "adult_ok": True})
+    await oleg.ok("POST", f"/users/{nina.id}/report", json={"block": True})
+    event = await add_event(hours=10)
+    for girl in (ira, katya, lena):
+        await girl.ok("POST", f"/events/{event}/attend", json={"status": "looking", "group": True, "girls_only": True})
+    girls = (await ira.ok("GET", f"/events/{event}"))["group"]
+    assert girls and {p["name"] for p in girls["others"]} == {"Катя", "Лена"}
+    # Миша can't join the girls' company; with Нина and Олег (who blocked each other) no company of 3 is possible.
+    for person in (misha, nina, oleg):
+        await person.ok("POST", f"/events/{event}/attend", json={"status": "looking", "group": True})
+    assert (await misha.ok("GET", f"/events/{event}"))["group"] is None
+    assert (await misha.ok("GET", f"/events/{event}"))["waiting"] is True
+
+
+async def test_pair_is_enough_close_to_start(client):
+    from app.db import Session
+    from app.groups import assemble_upcoming
+    a, b = await crowd(client, ["Петя", "Рита"])
+    event = await add_event(hours=3)
+    for person in (a, b):
+        await person.ok("POST", f"/events/{event}/attend", json={"status": "looking", "group": True})
+    assert (await a.ok("GET", f"/events/{event}"))["group"]["size"] == 2
+    late = await add_event(hours=0.5)
+    assert (await a.call("POST", f"/events/{late}/attend", json={"status": "looking", "group": True})).status_code == 200
+    async with Session() as session:
+        assert await assemble_upcoming(session) == 0

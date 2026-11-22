@@ -147,9 +147,9 @@ def icebreaker_questions(event, seed: int = 0) -> list[str]:
     return [pool[first], pool[(first + 1) % len(pool)]]
 
 
-def icebreaker_plain(event, seed: int = 0) -> str:
+def icebreaker_plain(event, seed: int = 0, group: bool = False) -> str:
     first, second = icebreaker_questions(event, seed)
-    return f"Вы оба идёте на «{event.title}». Чтобы начать разговор:\n— {first}\n— {second}"
+    return f"Вы {'все' if group else 'оба'} идёте на «{event.title}». Чтобы начать разговор:\n— {first}\n— {second}"
 
 
 # ---------- notifications ----------
@@ -159,6 +159,28 @@ def match_together(other, event, seed: int = 0) -> str:
     return (f"🤝 <b>Есть с кем пойти!</b>\n{who(other)} тоже хочет пойти с вами на «{q(event.title)}» "
             f"({when(event.starts_at)}).\n\nНапишите первым и договоритесь, где встретиться.\n"
             f"<i>Можно начать с вопроса: {q(first)}</i>")
+
+
+def names_list(users) -> str:
+    names = [q(u.name or "Гость") for u in users]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " и " + names[-1]
+
+
+def group_ready(others, event, seed: int = 0) -> str:
+    first, _ = icebreaker_questions(event, seed)
+    total = len(others) + 1
+    return (f"👥 <b>Компания собрана!</b>\nНа «{q(event.title)}» ({when(event.starts_at)}) вас {total}: "
+            f"вы, {names_list(others)}.\n\nПоздоровайтесь в общем чате и договоритесь, где встретиться.\n"
+            f"<i>Можно начать с вопроса: {q(first)}</i>")
+
+
+def group_joined(newcomer, event) -> str:
+    return f"👋 К вашей компании на «{q(event.title)}» присоединяется {who(newcomer)}. Поздоровайтесь!"
+
+
+def group_message(sender, text: str, event) -> str:
+    text = text if len(text) <= 300 else text[:299] + "…"
+    return f"👥 <b>{q(sender.name or 'Гость')}</b> · {q(event.title)}\n{q(text)}"
 
 
 def match_again(other, event) -> str:

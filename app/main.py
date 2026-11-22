@@ -13,6 +13,7 @@ from .config import settings
 from .db import init_db
 from .notify import status
 from .seo import router as seo_router
+from .groups import router as groups_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -55,6 +56,7 @@ app = FastAPI(title="Кто идёт", lifespan=lifespan, docs_url="/api/docs" i
               openapi_url="/api/openapi.json" if settings.dev else None)
 app.include_router(router)
 app.include_router(seo_router)
+app.include_router(groups_router)
 
 
 @app.get("/health")

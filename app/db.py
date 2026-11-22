@@ -23,7 +23,8 @@ async def init_db() -> None:
             marks = [row[1] for row in (await conn.exec_driver_sql("PRAGMA table_info(attendance)")).all()]
             if ((columns and ("email" not in columns or "nudges" not in columns)) or (events and "image" not in events)
                     or (marks and "reminded" not in marks) or (columns and "source" not in columns)
-                    or (columns and "gender" not in columns) or (marks and "girls_only" not in marks)):
+                    or (columns and "gender" not in columns) or (marks and "girls_only" not in marks)
+                    or (marks and "wants_group" not in marks)):
                 await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
         if engine.dialect.name == "postgresql":
@@ -40,6 +41,7 @@ async def init_db() -> None:
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS source VARCHAR(32) NOT NULL DEFAULT ''",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(1) NOT NULL DEFAULT ''",
                 "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS girls_only BOOLEAN NOT NULL DEFAULT FALSE",
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS wants_group BOOLEAN NOT NULL DEFAULT FALSE",
             ):
                 await conn.exec_driver_sql(statement)
 

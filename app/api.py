@@ -14,7 +14,8 @@ from .auth import (check_password, clean_source, current_user, exchange_code, ha
 from .config import settings
 from .db import get_session
 from .moderation import is_clean
-from .models import Attendance, AuthToken, Block, Event, Like, LoginCode, Match, Message, Report, User, utcnow
+from .models import (Attendance, AuthToken, Block, Event, GroupMember, GroupMessage, Like, LoginCode, Match, Message,
+                     Report, User, utcnow)
 from . import texts
 from .notify import notifier
 
@@ -276,6 +277,8 @@ async def delete_me(me: User = Depends(current_user), session: AsyncSession = De
         await session.execute(delete(Message).where(Message.match_id.in_(match_ids)))
         await session.execute(delete(Match).where(Match.id.in_(match_ids)))
     await session.execute(delete(Like).where(or_(Like.from_id == me.id, Like.to_id == me.id)))
+    await session.execute(delete(GroupMessage).where(GroupMessage.sender_id == me.id))
+    await session.execute(delete(GroupMember).where(GroupMember.user_id == me.id))
     await session.execute(delete(Attendance).where(Attendance.user_id == me.id))
     await session.execute(delete(Block).where(or_(Block.user_id == me.id, Block.target_id == me.id)))
     await session.execute(delete(Report).where(Report.reporter_id == me.id))
@@ -317,13 +320,15 @@ async def event_detail(event_id: int, me: Optional[User] = Depends(maybe_user),
         .where(Attendance.event_id == event.id, User.id != (me.id if me else 0)).limit(5))
     return {**event_card(event, *counts[event.id]), "description": event.description, "url": event.url,
             "source": event.source, "my_status": mine.status if mine else None,
-            "my_note": mine.note if mine else "", "my_girls_only": bool(mine and mine.girls_only), "faces": [u.name[:1].upper() or "?" for u in rows.scalars()]}
+            "my_note": mine.note if mine else "", "my_girls_only": bool(mine and mine.girls_only),
+            **await group_status(session, me, event), "faces": [u.name[:1].upper() or "?" for u in rows.scalars()]}
 
 
 class AttendIn(BaseModel):
     status: str = Field(pattern="^(going|looking|none)$")
     note: str = Field(default="", max_length=200)
     girls_only: bool = False
+    group: Optional[bool] = None  # «Соберите мне компанию»; None keeps the current choice
 
 
 @router.post("/events/{event_id}/attend")
@@ -335,18 +340,25 @@ async def attend(event_id: int, body: AttendIn, me: User = Depends(current_user)
     mine = await session.get(Attendance, (me.id, event.id))
     now_looking = body.status == "looking" and (mine is None or mine.status != "looking")
     girls_only = body.girls_only and body.status == "looking" and me.gender == "f"
+    wants_group = body.status == "looking" and (body.group if body.group is not None else bool(mine and mine.wants_group))
     if body.status == "none":
         if mine:
             await session.delete(mine)
     elif mine:
-        mine.status, mine.note, mine.girls_only = body.status, body.note.strip(), girls_only
+        mine.status, mine.note, mine.girls_only, mine.wants_group = (body.status, body.note.strip(), girls_only,
+                                                                     wants_group)
     else:
         session.add(Attendance(user_id=me.id, event_id=event.id, status=body.status, note=body.note.strip(),
-                               girls_only=girls_only))
+                               girls_only=girls_only, wants_group=wants_group))
+    if not wants_group:
+        await leave_group(session, me.id, event.id)
     await session.commit()
     if now_looking and event.starts_at > utcnow():
         await tell_companions(session, me, event, girls_only)
-    return {"my_status": None if body.status == "none" else body.status, "girls_only": girls_only}
+    if wants_group:
+        await assemble(session, event)
+    return {"my_status": None if body.status == "none" else body.status, "girls_only": girls_only,
+            **await group_status(session, me, event)}
 
 
 async def tell_companions(session: AsyncSession, me: User, event: Event, girls_only: bool = False) -> None:
@@ -669,3 +681,6 @@ async def org_checkin(event_id: int, user_id: int, me: User = Depends(current_us
     guest.checked_in = not guest.checked_in
     await session.commit()
     return {"checked_in": guest.checked_in}
+
+
+from .groups import assemble, group_status, leave_group  # noqa: E402  (groups.py builds on the helpers above)

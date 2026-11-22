@@ -69,6 +69,8 @@ class Attendance(Base):
     note: Mapped[str] = mapped_column(String(200), default="")
     # «Только с девушками»: only women see this person in «ищут компанию» and can invite her.
     girls_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    # «Соберите мне компанию»: the person waits to be put into a group of 3–5.
+    wants_group: Mapped[bool] = mapped_column(Boolean, default=False)
     checked_in: Mapped[bool] = mapped_column(Boolean, default=False)
     after_prompted: Mapped[bool] = mapped_column(Boolean, default=False)
     reminded: Mapped[bool] = mapped_column(Boolean, default=False)  # «сегодня в 19:00…» already sent
@@ -145,3 +147,28 @@ class Setting(Base):
     __tablename__ = "settings"
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(String(500), default="")
+
+
+class Group(Base):
+    """A company of 3–5 people for one event, put together by the service. Has a shared chat."""
+    __tablename__ = "groups"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
+    girls_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class GroupMember(Base):
+    __tablename__ = "group_members"
+    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class GroupMessage(Base):
+    __tablename__ = "group_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"), index=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    text: Mapped[str] = mapped_column(String(1000))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

@@ -150,6 +150,31 @@ screens.afisha = async () => {
     ${nav('')}</div>`;
 };
 
+function companyCard(e) {
+  const faces = (list) => `<span class="faces">${list.slice(0, 4).map((p) => ava(p, 's')).join('')}</span>`;
+  if (e.group) {
+    const names = e.group.others.map((p) => esc(p.name)).join(', ');
+    return `<button class="card company ready" data-go="group/${e.group.id}">
+      <span class="between"><span class="kicker">👥 Ваша компания</span><span class="badge ink">${e.group.size} ${plural(e.group.size, 'человек', 'человека', 'человек')}</span></span>
+      <span class="line">${faces(e.group.others)}<span class="small semi clip">Вы${names ? ', ' + names : ''}</span></span>
+      <span class="btn lime small">Открыть чат компании</span></button>`;
+  }
+  if (e.started) return '';
+  if (e.waiting) {
+    return `<div class="card company">
+      <span class="kicker">👥 Собираем компанию</span>
+      <span class="semi">${e.waiting_count ? `Кроме вас ждут ещё ${e.waiting_count}. ` : ''}Как только наберётся 3 человека, откроем общий чат и пришлём уведомление.</span>
+      <span class="tiny semi muted">Ближе к началу хватит и двоих.</span>
+      <button class="btn text small danger" data-company-stop="${e.id}">Не собирать</button></div>`;
+  }
+  return `<div class="card company">
+    <span class="kicker">👥 Компания на вечер</span>
+    <span class="strong" style="font-size:18px">Не хочется вдвоём с незнакомцем?</span>
+    <span class="small semi">Соберём компанию из 3–5 человек, которые тоже идут, и откроем общий чат. С компанией проще и не похоже на свидание.</span>
+    ${e.waiting_count ? `<span class="looking">Уже ждут: ${e.waiting_count}</span>` : ''}
+    <button class="btn ink small" data-company="${e.id}">Соберите мне компанию</button></div>`;
+}
+
 screens.event = async (id) => {
   const e = await api('GET', '/events/' + id);
   state.event = e;
@@ -169,6 +194,7 @@ screens.event = async (id) => {
         <div class="fact"><span class="tiny strong muted">Билет</span><span class="semi">${esc(e.price || 'На сайте события')}</span></div>
       </div>
       ${e.description ? `<p>${esc(e.description)}</p>` : ''}
+      ${companyCard(e)}
       <button class="card" data-go="event/${e.id}/people">
         <span class="between"><h2 class="strong" style="font-size:17px">Кто идёт</h2><span class="looking">${e.going ? 'Все ' + e.going : ''}</span></span>
         <span class="line">${e.faces.length ? `<span class="faces">${e.faces.map((f, i) => `<span class="ava s c${i % 6}">${esc(f)}</span>`).join('')}</span>` : ''}
@@ -253,22 +279,26 @@ screens.after = async (id) => {
 };
 
 screens.chats = async () => {
-  const [data, mine] = await Promise.all([api('GET', '/matches'), api('GET', '/my/events')]);
+  const [data, mine, companies] = await Promise.all([api('GET', '/matches'), api('GET', '/my/events'), api('GET', '/groups')]);
+  const groups = companies.groups.map((g) => `<button class="compact" data-go="group/${g.id}" style="border-radius:24px">
+    <span class="group-ava">${g.others.slice(0, 3).map((p) => ava(p, 's')).join('') || ava({ name: '👥', id: 0 }, 'l')}</span>
+    <span class="col" style="flex:1;min-width:0"><span class="between"><span class="strong clip" style="font-size:17px">👥 ${esc(g.event.title)}</span><span class="tiny semi muted">${when(g.at, false)}</span></span>
+    <span class="small semi muted clip">${g.last ? (g.last_from ? esc(g.last_from) + ': ' : '') + esc(g.last) : 'Компания: вы, ' + g.others.map((p) => esc(p.name)).join(', ')}</span></span></button>`).join('');
   const prompts = mine.past.map((e) => `<button class="card" data-go="after/${e.id}" style="background:var(--lime)">
     <span class="tiny strong">${when(e.starts_at, false)} · ${esc(e.title)}</span><span class="strong" style="font-size:17px">С кем хочется увидеться ещё?</span></button>`).join('');
   const rows = data.matches.map((m) => `<button class="compact" data-go="chat/${m.id}" style="border-radius:24px">${ava(m.other, 'l')}
     <span class="col" style="flex:1"><span class="between"><span class="strong" style="font-size:17px">${esc(m.other.name)}</span><span class="tiny semi muted">${when(m.at, false)}</span></span>
     <span class="small semi muted clip">${m.last ? (m.last_mine ? 'Вы: ' : '') + esc(m.last) : esc(m.event.title)}</span></span></button>`).join('');
   return `<div class="screen with-nav"><header class="head"><h1 class="display">Чаты</h1></header>
-    <main class="body">${prompts}${rows || (prompts ? '' : empty('Чатов пока нет', 'Чат открывается, когда вы и другой гость оба нажали «Пойдём вместе».', '<button class="btn ink small" data-go="people">Кто ищет компанию</button>'))}</main>${nav('chats')}</div>`;
+    <main class="body">${prompts}${groups}${rows || (prompts || groups ? '' : empty('Чатов пока нет', 'Чат открывается, когда вы и другой гость оба нажали «Пойдём вместе».', '<button class="btn ink small" data-go="people">Кто ищет компанию</button>'))}</main>${nav('chats')}</div>`;
 };
 
-const bubble = (m) => `<p class="msg ${m.mine ? 'out' : 'in'}" data-id="${m.id}">${esc(m.text)}</p>`;
+const bubble = (m) => `<p class="msg ${m.mine ? 'out' : 'in'}" data-id="${m.id}">${!m.mine && m.from ? `<b class="from">${esc(m.from)}</b>` : ''}${esc(m.text)}</p>`;
 screens.chat = async (id) => {
   const c = await api('GET', '/matches/' + id);
-  state.chat = { id, last: c.messages.length ? c.messages[c.messages.length - 1].id : 0, other: c.other };
+  state.chat = { id, base: '/matches/', last: c.messages.length ? c.messages[c.messages.length - 1].id : 0, other: c.other };
   const timer = state.timer = setInterval(async () => {
-    if (!state.chat || state.chat.id !== id) return clearInterval(timer);
+    if (!state.chat || state.chat.id !== id || state.chat.base !== '/matches/') return clearInterval(timer);
     try {
       const fresh = await api('GET', `/matches/${id}?after=${state.chat.last}`);
       addMessages(fresh.messages);
@@ -287,6 +317,30 @@ screens.chat = async (id) => {
     <div class="compose">${quick}<form id="send"><label style="flex:1"><span hidden>Сообщение</span><input class="input round-input" name="text" placeholder="Сообщение" autocomplete="off" maxlength="1000" enterkeyhint="send"></label>
       <button class="round" style="background:var(--ink);color:#fff;width:52px;height:52px;border-radius:26px" aria-label="Отправить">${ICON.send}</button></form></div></div>`;
 };
+screens.group = async (id) => {
+  const c = await api('GET', '/groups/' + id);
+  state.chat = { id, base: '/groups/', last: c.messages.length ? c.messages[c.messages.length - 1].id : 0, group: c };
+  const timer = state.timer = setInterval(async () => {
+    if (!state.chat || state.chat.id !== id || state.chat.base !== '/groups/') return clearInterval(timer);
+    try {
+      const fresh = await api('GET', `/groups/${id}?after=${state.chat.last}`);
+      addMessages(fresh.messages);
+    } catch (e) { /* next tick will retry */ }
+  }, 4000);
+  const ice = c.icebreaker.split('\n').filter((l) => l.startsWith('— ')).map((l) => l.slice(2));
+  const quick = c.messages.length ? '' : `<div class="chips" style="margin:0">${['Всем привет! 👋', ...ice, 'Встречаемся у входа за 15 минут?'].map((t) => `<button class="chip small" data-quick="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
+  const size = c.others.length + 1;
+  return `<div class="screen" style="padding-top:0">
+    <header class="chat-head">
+      <div class="line" style="gap:12px">${backBtn('soft')}<span class="faces">${c.others.slice(0, 3).map((p) => ava(p, 's')).join('')}</span>
+        <div class="col" style="gap:0;flex:1;min-width:0"><h1 class="strong clip" style="font-size:18px">Компания из ${size}</h1><span class="small semi muted clip">Вы, ${c.others.map((p) => esc(p.name)).join(', ') || 'пока больше никого'}</span></div>
+        <button class="round soft" data-group-menu="${c.id}" aria-label="Участники">${ICON.more}</button></div>
+      <button class="chat-event" data-go="event/${c.event.id}" style="text-align:left"><span class="small strong">${esc(c.event.title)}</span><span class="small semi muted">${when(c.event.starts_at)}${c.event.place ? ' · ' + esc(c.event.place) : ''}</span></button>
+    </header>
+    <main class="msgs" id="msgs"><p class="sys">Мы собрали компанию из тех, кто тоже идёт${c.girls_only ? ' — только девушки' : ''}. Договоритесь, где встретиться</p><p class="sys ice">💡 ${esc(c.icebreaker).replace(/\n/g, '<br>')}</p>${c.messages.map(bubble).join('')}</main>
+    <div class="compose">${quick}<form id="send"><label style="flex:1"><span hidden>Сообщение</span><input class="input round-input" name="text" placeholder="Сообщение компании" autocomplete="off" maxlength="1000" enterkeyhint="send"></label>
+      <button class="round" style="background:var(--ink);color:#fff;width:52px;height:52px;border-radius:26px" aria-label="Отправить">${ICON.send}</button></form></div></div>`;
+};
 function addMessages(list) {
   const box = document.getElementById('msgs');
   if (!box || !state.chat) return;
@@ -298,7 +352,7 @@ function addMessages(list) {
 async function sendMessage(text) {
   text = text.trim();
   if (!text || !state.chat) return;
-  const sent = await act(() => api('POST', `/matches/${state.chat.id}/messages`, { text }));
+  const sent = await act(() => api('POST', `${state.chat.base}${state.chat.id}/messages`, { text }));
   if (sent) { addMessages([sent]); const quick = document.querySelector('.compose .chips'); if (quick) quick.remove(); }
 }
 
@@ -434,6 +488,7 @@ async function render() {
     else if (a === 'after') html = await screens.after(b);
     else if (a === 'chats') html = await screens.chats();
     else if (a === 'chat') html = await screens.chat(b);
+    else if (a === 'group') html = await screens.group(b);
     else if (a === 'profile') html = b === 'edit' ? await screens.profileEdit() : await screens.profile();
     else if (a === 'org') html = b === 'new' ? await screens.orgNew() : b ? await screens.orgEvent(b) : await screens.org();
     else html = await screens.afisha();
@@ -445,7 +500,7 @@ async function render() {
   }
   if (token !== state.token) return;
   $app.innerHTML = html;
-  if (a === 'chat') window.scrollTo(0, document.body.scrollHeight); else window.scrollTo(0, 0);
+  if (a === 'chat' || a === 'group') window.scrollTo(0, document.body.scrollHeight); else window.scrollTo(0, 0);
 }
 
 // ---------- actions ----------
@@ -459,6 +514,15 @@ function adSource() {
   } catch (err) { return ''; }
 }
 adSource();
+
+async function joinCompany(e, girlsOnly) {
+  const res = await act(() => api('POST', `/events/${e.id}/attend`, { status: 'looking', note: e.my_note || '', group: true, girls_only: girlsOnly }));
+  if (!res) return;
+  haptic();
+  if (res.group) return go('group/' + res.group.id);
+  toast('Собираем компанию — пришлём уведомление');
+  render();
+}
 
 async function shareEvent(e) {
   if (!e) return;
@@ -493,6 +557,32 @@ document.addEventListener('click', async (event) => {
   if (d.link) return tg && tg.openLink ? tg.openLink(d.link) : window.open(d.link, '_blank', 'noopener');
   if (d.tg) return tg && tg.openTelegramLink ? tg.openTelegramLink(d.tg) : window.open(d.tg, '_blank', 'noopener');
   if ('share' in d) return shareEvent(state.event);
+  if (d.company) {
+    if (!state.me) { state.returnTo = route().join('/'); return go('auth'); }
+    const e = state.event;
+    if (isGirl()) {
+      return sheet(`<h2 class="strong">Соберём компанию</h2><p class="muted">Найдём 2–4 человек, которые тоже идут, и откроем общий чат.</p>
+        <label class="check"><input type="checkbox" id="company-girls" ${e.my_girls_only ? 'checked' : ''}><span>👭 Только девушки</span></label>
+        <button class="btn ink" data-company-go="${e.id}">Соберите мне компанию</button><button class="btn text" data-close>Отмена</button>`);
+    }
+    return joinCompany(e, false);
+  }
+  if (d.companyGo) { const only = document.getElementById('company-girls'); closeSheet(); return joinCompany(state.event, !!(only && only.checked)); }
+  if (d.companyStop) {
+    if (await act(() => api('POST', `/events/${d.companyStop}/attend`, { status: 'looking', note: state.event.my_note || '', group: false }))) render();
+    return;
+  }
+  if (d.groupMenu) {
+    const g = state.chat && state.chat.group;
+    if (!g) return;
+    return sheet(`<h2 class="strong">Компания</h2>
+      ${g.others.map((p) => `<div class="between">${ava(p, 'm')}<span class="semi" style="flex:1;margin-left:12px">${who(p)}</span><button class="btn text small quiet" data-report="${p.id}">Пожаловаться</button></div>`).join('')}
+      <button class="btn text danger" data-group-leave="${g.id}">Выйти из компании</button><button class="btn text" data-close>Закрыть</button>`);
+  }
+  if (d.groupLeave) {
+    if (await act(() => api('POST', `/groups/${d.groupLeave}/leave`))) { closeSheet(); toast('Вы вышли из компании'); go('chats'); }
+    return;
+  }
   if ('gender' in d) {
     document.querySelectorAll('[data-gender]').forEach((b) => b.setAttribute('aria-pressed', String(b === el)));
     return;
@@ -644,7 +734,7 @@ document.addEventListener('submit', async (event) => {
 // ---------- start ----------
 function deepLink() {
   const target = params.get('go') || (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || '';
-  const m = /^(chat|after|event|match|people)-(\d+)$/.exec(target);
+  const m = /^(chat|after|event|match|people|group)-(\d+)$/.exec(target);
   if (m) return m[1] === 'people' ? `event/${m[2]}/people` : `${m[1]}/${m[2]}`;
   return target === 'org' ? 'org' : '';
 }

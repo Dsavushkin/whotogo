@@ -8,7 +8,7 @@ from typing import Optional
 
 from sqlalchemy import func, or_, select
 
-from . import texts
+from . import groups, texts
 from .config import settings
 from .db import Session
 from .importer import run_import
@@ -127,12 +127,19 @@ async def send_day_reminders(now: Optional[datetime] = None) -> int:
                 if partner and partner.id not in blocked and not partner.is_banned:
                     chats.append((m, partner))
             partners = [p for _, p in chats]
+            group = await groups.my_group(session, user.id, event.id)
+            if group:
+                company = [p for p in await groups.members_of(session, group.id)
+                           if p.id != user.id and p.id not in blocked and not p.is_banned]
+                partners = company + [p for p in partners if p not in company]
             if event.id not in looking_counts:
                 looking_counts[event.id] = await session.scalar(select(func.count()).select_from(Attendance).where(
                     Attendance.event_id == event.id, Attendance.status == "looking"))
             others = looking_counts[event.id] - (attendance.status == "looking")
             text = texts.day_reminder(event, partners, others, attendance.status)
-            if chats:
+            if group:
+                buttons = [("Чат компании", f"group-{group.id}")]
+            elif chats:
                 buttons = [("Открыть чат", f"chat-{chats[0][0].id}")]
             elif attendance.status == "looking":
                 buttons = [("Кто ищет компанию", f"people-{event.id}")]
@@ -156,6 +163,8 @@ async def run_jobs() -> None:
             await send_after_prompts()
             await send_weekend_nudges()
             await send_day_reminders()
+            async with Session() as session:
+                await groups.assemble_upcoming(session)
         except asyncio.CancelledError:
             raise
         except Exception:
