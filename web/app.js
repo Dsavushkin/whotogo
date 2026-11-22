@@ -606,8 +606,8 @@ document.addEventListener('submit', async (event) => {
 // ---------- start ----------
 function deepLink() {
   const target = params.get('go') || (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || '';
-  const m = /^(chat|after|event|match)-(\d+)$/.exec(target);
-  if (m) return `${m[1]}/${m[2]}`;
+  const m = /^(chat|after|event|match|people)-(\d+)$/.exec(target);
+  if (m) return m[1] === 'people' ? `event/${m[2]}/people` : `${m[1]}/${m[2]}`;
   return target === 'org' ? 'org' : '';
 }
 async function start() {

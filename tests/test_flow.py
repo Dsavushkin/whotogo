@@ -29,6 +29,9 @@ async def test_together_only_when_mutual(people):
         await person.ok("POST", f"/events/{event_id}/attend", json={"status": "looking", "note": "Привет"})
     listed = (await vera.ok("GET", f"/events/{event_id}/people"))["people"]
     assert {p["name"] for p in listed} == {"Аня", "Кирилл"} and not any(p["invited"] for p in listed)
+    # Аня hears that one more person looks for company there; nothing about who invited whom
+    assert [(s[0], s[2]) for s in notifier.sent] == [(anya.tg_id, f"people-{event_id}")] and "Кирилл" in notifier.sent[0][1]
+    notifier.sent.clear()
 
     first = await vera.ok("POST", f"/events/{event_id}/invite/{anya.id}")
     assert first["match_id"] is None and first["other"] is None
@@ -42,7 +45,7 @@ async def test_together_only_when_mutual(people):
 
     second = await anya.ok("POST", f"/events/{event_id}/invite/{vera.id}")
     assert second["match_id"] and second["other"]["name"] == "Вера"
-    assert [s[0] for s in notifier.sent] == [vera.tg_id] and "Идёте вместе" in notifier.sent[0][1]
+    assert [s[0] for s in notifier.sent] == [vera.tg_id] and "Есть пара" in notifier.sent[0][1]
     assert len((await vera.ok("GET", "/matches"))["matches"]) == 1
     assert (await kirill.ok("GET", "/matches"))["matches"] == []
     assert (await kirill.call("GET", f"/matches/{second['match_id']}")).status_code == 404
@@ -55,6 +58,7 @@ async def test_chat_and_block(people):
     await vera.ok("POST", f"/events/{event_id}/attend", json={"status": "looking"})
     await vera.ok("POST", f"/events/{event_id}/invite/{anya.id}")
     match_id = (await anya.ok("POST", f"/events/{event_id}/invite/{vera.id}"))["match_id"]
+    notifier.sent.clear()
 
     await vera.ok("POST", f"/matches/{match_id}/messages", json={"text": "Привет!"})
     await vera.ok("POST", f"/matches/{match_id}/messages", json={"text": "Где встретимся?"})
@@ -366,3 +370,31 @@ async def test_seo_pages(client):
     sitemap = (await client.get("/sitemap.xml")).text
     assert f"/e/{event_id}-dzhaz-v-siney-ptitse</loc>" in sitemap and "/afisha/vyhodnye</loc>" in sitemap
     assert (await client.get("/robots.txt")).text == "User-agent: *\nDisallow: /\n"  # test host ≠ main domain
+
+
+async def test_day_reminders(people):
+    from datetime import datetime, timedelta, timezone
+    from app.jobs import send_day_reminders
+    vera, anya, kirill = people
+    now = datetime(2026, 11, 20, 12, 0, tzinfo=timezone(timedelta(hours=3)))  # Friday, noon in Moscow
+    starts = (now + timedelta(hours=7)).astimezone(timezone.utc).replace(tzinfo=None)  # 19:00
+    from app.db import Session
+    from app.models import Event
+    async with Session() as session:
+        event = Event(title="Квиз <Мозгобойня>", starts_at=starts, place="Бар «Ровесник»")
+        session.add(event)
+        await session.commit()
+    for person in (vera, anya, kirill):
+        await person.ok("POST", f"/events/{event.id}/attend", json={"status": "looking"})
+    await vera.ok("POST", f"/events/{event.id}/invite/{anya.id}")
+    match_id = (await anya.ok("POST", f"/events/{event.id}/invite/{vera.id}"))["match_id"]
+    notifier.sent.clear()
+
+    assert await send_day_reminders(now) == 0  # 7 hours before: too early
+    assert await send_day_reminders(now + timedelta(hours=3)) == 3  # 15:00
+    sent = {s[0]: s for s in notifier.sent}
+    assert "Сегодня в 19:00" in sent[vera.tg_id][1] and "Квиз &lt;Мозгобойня&gt;" in sent[vera.tg_id][1]
+    assert "Идёте вместе с: Аня" in sent[vera.tg_id][1]
+    assert "ищут ещё 2" in sent[kirill.tg_id][1]
+    assert await send_day_reminders(now + timedelta(hours=4)) == 0  # once per event
+    assert match_id

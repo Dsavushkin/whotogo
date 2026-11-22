@@ -66,6 +66,7 @@ class Attendance(Base):
     note: Mapped[str] = mapped_column(String(200), default="")
     checked_in: Mapped[bool] = mapped_column(Boolean, default=False)
     after_prompted: Mapped[bool] = mapped_column(Boolean, default=False)
+    reminded: Mapped[bool] = mapped_column(Boolean, default=False)  # «сегодня в 19:00…» already sent
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

@@ -15,6 +15,7 @@ from .config import settings
 from .db import get_session
 from .moderation import is_clean
 from .models import Attendance, AuthToken, Block, Event, Like, LoginCode, Match, Message, Report, User, utcnow
+from . import texts
 from .notify import notifier
 
 router = APIRouter(prefix="/api")
@@ -123,9 +124,8 @@ async def make_match(session: AsyncSession, me: User, other_id: int, event: Even
     if created:
         other = await session.get(User, other_id)
         if other:
-            text = (f"Идёте вместе: {me.name} тоже хочет пойти с вами на «{event.title}»." if kind == "together"
-                    else f"Это взаимно: {me.name} тоже хочет увидеться ещё после «{event.title}».")
-            await notifier.send(other.tg_id, text, f"chat-{match.id}")
+            text = texts.match_together(me, event) if kind == "together" else texts.match_again(me, event)
+            await notifier.send(other.tg_id, text, f"chat-{match.id}", button="Написать")
     return match
 
 
@@ -311,6 +311,7 @@ async def attend(event_id: int, body: AttendIn, me: User = Depends(current_user)
     require_clean(body.note)
     event = await get_event(session, event_id)
     mine = await session.get(Attendance, (me.id, event.id))
+    now_looking = body.status == "looking" and (mine is None or mine.status != "looking")
     if body.status == "none":
         if mine:
             await session.delete(mine)
@@ -319,7 +320,23 @@ async def attend(event_id: int, body: AttendIn, me: User = Depends(current_user)
     else:
         session.add(Attendance(user_id=me.id, event_id=event.id, status=body.status, note=body.note.strip()))
     await session.commit()
+    if now_looking and event.starts_at > utcnow():
+        await tell_companions(session, me, event)
     return {"my_status": None if body.status == "none" else body.status}
+
+
+async def tell_companions(session: AsyncSession, me: User, event: Event) -> None:
+    """Someone new looks for company: tell the others who look for company at the same event.
+    At most one such message per person and event every six hours."""
+    hidden = await blocked_ids(session, me)
+    rows = await session.execute(
+        select(User).join(Attendance, Attendance.user_id == User.id)
+        .where(Attendance.event_id == event.id, Attendance.status == "looking", User.id != me.id,
+               User.is_banned.is_(False), User.tg_id.is_not(None)).limit(30))
+    for other in rows.scalars():
+        if other.id not in hidden:
+            await notifier.send(other.tg_id, texts.new_companion(me, event), f"people-{event.id}",
+                                throttle_key=f"c{event.id}", throttle_seconds=6 * 3600, button="Посмотреть")
 
 
 @router.get("/events/{event_id}/people")
@@ -508,7 +525,8 @@ async def send_message(match_id: int, body: MessageIn, me: User = Depends(curren
     message = Message(match_id=match.id, sender_id=me.id, text=text)
     session.add(message)
     await session.commit()
-    await notifier.send(other.tg_id, f"{me.name}: {text[:120]}", f"chat-{match.id}", throttle_key=f"m{match.id}")
+    await notifier.send(other.tg_id, texts.chat_message(me, text), f"chat-{match.id}", throttle_key=f"m{match.id}",
+                        button="Ответить")
     return {"id": message.id, "mine": True, "text": text, "at": to_local_iso(message.created_at)}
 
 
@@ -528,8 +546,9 @@ async def report(user_id: int, body: ReportIn, me: User = Depends(current_user),
     if body.reason.strip():
         session.add(Report(reporter_id=me.id, target_id=target.id, reason=body.reason.strip()))
         for admin in settings.admin_ids:
-            await notifier.send(admin, f"Жалоба на {target.name} (id {target.id}, tg {target.tg_id}) "
-                                       f"от {me.name} (id {me.id}): {body.reason.strip()[:300]}")
+            await notifier.send(admin, f"⚠️ Жалоба на {texts.q(target.name)} (id {target.id}, tg {target.tg_id}) "
+                                       f"от {texts.q(me.name)} (id {me.id}): {texts.q(body.reason.strip()[:300])}",
+                                buttons=[])
     if body.block and await session.get(Block, (me.id, target.id)) is None:
         session.add(Block(user_id=me.id, target_id=target.id))
     await session.commit()
