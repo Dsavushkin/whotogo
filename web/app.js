@@ -174,6 +174,7 @@ screens.event = async (id) => {
         <span class="line">${e.faces.length ? `<span class="faces">${e.faces.map((f, i) => `<span class="ava s c${i % 6}">${esc(f)}</span>`).join('')}</span>` : ''}
         <span class="small semi">${e.looking ? e.looking + ' ' + plural(e.looking, 'человек ищет', 'человека ищут', 'человек ищут') + ', с кем пойти' : 'Пока никто не ищет компанию. Будьте первым.'}</span></span>
       </button>
+      ${e.started ? '' : '<button class="btn white small" data-share>Позвать друга</button>'}
       ${e.url ? `<button class="btn white small" data-link="${esc(e.url)}">Билеты и подробности</button>` : ''}
       ${e.source === 'timepad' ? '<p class="tiny muted">Источник: Timepad</p>' : ''}
     </main>
@@ -444,6 +445,18 @@ async function render() {
 // ---------- actions ----------
 function formError(text) { const el = document.getElementById('error'); if (el) { el.textContent = text; el.hidden = !text; } }
 
+async function shareEvent(e) {
+  if (!e) return;
+  const text = `Пойдёшь со мной на «${e.title}»? ${when(e.starts_at, true)}`;
+  if (inTelegram && tg.openTelegramLink) {
+    const link = `https://t.me/${state.bot}?startapp=event-${e.id}`;
+    return tg.openTelegramLink('https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent(text));
+  }
+  const url = location.origin + '/e/' + e.id;
+  if (navigator.share) { try { await navigator.share({ title: e.title, text, url }); } catch (err) { /* closed */ } return; }
+  try { await navigator.clipboard.writeText(text + ' ' + url); toast('Ссылка скопирована'); } catch (err) { toast(url); }
+}
+
 function reportSheet(userId) {
   sheet(`<h2 class="strong">Пожаловаться</h2><p class="muted">Этот человек больше не увидит вас, а вы — его. Жалобу прочитает команда.</p>
     <label class="field"><span>Что случилось</span><textarea class="input" id="reason" maxlength="500" placeholder="Необязательно"></textarea></label>
@@ -464,6 +477,7 @@ document.addEventListener('click', async (event) => {
   if ('category' in d) { state.category = d.category; return render(); }
   if (d.link) return tg && tg.openLink ? tg.openLink(d.link) : window.open(d.link, '_blank', 'noopener');
   if (d.tg) return tg && tg.openTelegramLink ? tg.openTelegramLink(d.tg) : window.open(d.tg, '_blank', 'noopener');
+  if ('share' in d) return shareEvent(state.event);
   if ('interest' in d) {
     const on = el.getAttribute('aria-pressed') === 'true';
     if (!on && document.querySelectorAll('[data-interest][aria-pressed=true]').length >= 5) return toast('Можно выбрать до пяти');

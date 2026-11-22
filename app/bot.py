@@ -1,4 +1,5 @@
 """Telegram bot @whotogo: entry point to the Mini App, notifications and admin commands."""
+import asyncio
 import logging
 import re
 from pathlib import Path
@@ -6,11 +7,11 @@ from typing import Optional
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import (BotCommand, CallbackQuery, FSInputFile, InputProfilePhotoStatic, MenuButtonWebApp,
-                           Message, WebAppInfo)
+from aiogram.types import (BotCommand, CallbackQuery, ChatMemberUpdated, FSInputFile, InputProfilePhotoStatic,
+                           MenuButtonWebApp, Message, WebAppInfo)
 from sqlalchemy import func, select
 
-from . import texts
+from . import channel, texts
 from .auth import issue_login_code
 from .config import settings
 from .db import Session
@@ -130,6 +131,7 @@ async def help_(message: Message):
         text += ("\n\n<b>Для администратора</b>\n/stats — цифры\n/import — обновить афишу\n"
                  "/organizer &lt;tg id&gt; — дать права организатора\n/ban &lt;id&gt; и /unban &lt;id&gt; — блокировка\n"
                  "/hide &lt;id события&gt; — скрыть событие\n/reports — последние жалобы\n"
+                 "/post today | weekend — опубликовать подборку в канал\n"
                  "Ответить пользователю: ответьте (reply) на его пересланное сообщение.")
     await reply(message, text, [("Открыть афишу", "")])
 
@@ -227,6 +229,45 @@ async def reports(message: Message):
     await reply(message, "\n".join(lines) or "Жалоб нет.")
 
 
+@router.my_chat_member()
+async def added_to_channel(update: ChatMemberUpdated):
+    """A project admin makes the bot an administrator of a channel: the bot starts posting there."""
+    if update.chat.type != "channel" or not update.from_user or update.from_user.id not in settings.admin_ids:
+        return
+    status_now = update.new_chat_member.status
+    title = texts.q(update.chat.title or update.chat.username or update.chat.id)
+    if status_now == "administrator":
+        await channel.set_setting("channel", str(update.chat.id))
+        await notifier.send(update.from_user.id,
+                            f"📣 Канал «{title}» подключён. Буду публиковать подборки каждый день в 11:00 и "
+                            "в четверг в 19:00. Опубликовать сейчас: /post", buttons=[])
+    elif status_now in ("left", "kicked") and await channel.get_setting("channel") == str(update.chat.id):
+        await channel.set_setting("channel", "")
+        await notifier.send(update.from_user.id, f"Канал «{title}» отключён.", buttons=[])
+
+
+@router.message(Command("post"))
+async def post_now(message: Message, command: CommandObject):
+    if not is_admin(message):
+        return
+    kind = (command.args or "today").strip()
+    if kind not in channel.TITLES:
+        return await message.answer("Так: /post today или /post weekend")
+    if not await channel.get_setting("channel"):
+        return await message.answer("Канал не подключён: добавьте бота администратором канала.")
+    done = await channel.post(message.bot, kind)
+    await message.answer("Опубликовано." if done else "Не опубликовал: подходящих событий меньше трёх.")
+
+
+async def channel_loop(bot: Bot) -> None:
+    while True:
+        try:
+            await channel.run_schedule(bot)
+        except Exception as error:
+            log.warning("channel schedule failed: %s", error)
+        await asyncio.sleep(300)
+
+
 @router.message()
 async def anything(message: Message):
     """Free text goes to the admins as a support request; an admin answers by replying to it."""
@@ -299,7 +340,11 @@ async def run_bot() -> None:
                 text="Афиша", web_app=WebAppInfo(url=settings.webapp_url + "/")))
         await set_up_profile(bot, me.id)
         await bot.delete_webhook(drop_pending_updates=False)
-        await dispatcher.start_polling(bot, handle_signals=False)
+        poster = asyncio.create_task(channel_loop(bot))
+        try:
+            await dispatcher.start_polling(bot, handle_signals=False)
+        finally:
+            poster.cancel()
     finally:
         notifier.bot = None
         await bot.session.close()

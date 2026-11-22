@@ -398,3 +398,38 @@ async def test_day_reminders(people):
     assert "ищут ещё 2" in sent[kirill.tg_id][1]
     assert await send_day_reminders(now + timedelta(hours=4)) == 0  # once per event
     assert match_id
+
+
+async def test_channel_posts(client):
+    from datetime import datetime, timedelta, timezone
+    from app import channel
+    from app.db import Session
+    from app.models import Event
+    now = datetime(2026, 11, 20, 11, 5, tzinfo=timezone(timedelta(hours=3)))  # Friday 11:05 Moscow
+    base = now.astimezone(timezone.utc).replace(tzinfo=None)
+    async with Session() as session:
+        for i, (title, category, hours) in enumerate([("Утренняя экскурсия", "walk", 1), ("Джаз <вечер>", "music", 8),
+                                                     ("Квиз", "games", 9), ("Лекция", "talk", 7),
+                                                     ("Ещё квиз", "games", 9), ("Третий квиз", "games", 10)]):
+            session.add(Event(title=title, category=category, starts_at=base + timedelta(hours=hours), place="Бар",
+                              image="https://img/x.jpg" if i == 1 else ""))
+        await session.commit()
+
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send_photo(self, chat, photo, **kw):
+            self.sent.append(("photo", chat, kw["caption"]))
+
+        async def send_message(self, chat, text, **kw):
+            self.sent.append(("text", chat, text))
+
+    bot = FakeBot()
+    assert await channel.run_schedule(bot, now) == []  # no channel yet
+    await channel.set_setting("channel", "-100123")
+    assert await channel.run_schedule(bot, now) == ["today"]
+    kind, chat, text = bot.sent[0]
+    assert kind == "photo" and chat == "-100123" and "Куда сходить сегодня, 20 ноября" in text
+    assert "Джаз &lt;вечер&gt;" in text and "startapp=event-" in text and text.count("квиз") + text.count("Квиз") == 2
+    assert await channel.run_schedule(bot, now + timedelta(minutes=10)) == []  # once a day
