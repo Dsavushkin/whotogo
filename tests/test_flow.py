@@ -45,7 +45,7 @@ async def test_together_only_when_mutual(people):
 
     second = await anya.ok("POST", f"/events/{event_id}/invite/{vera.id}")
     assert second["match_id"] and second["other"]["name"] == "Вера"
-    assert [s[0] for s in notifier.sent] == [vera.tg_id] and "Есть пара" in notifier.sent[0][1]
+    assert [s[0] for s in notifier.sent] == [vera.tg_id] and "Есть с кем пойти" in notifier.sent[0][1]
     assert len((await vera.ok("GET", "/matches"))["matches"]) == 1
     assert (await kirill.ok("GET", "/matches"))["matches"] == []
     assert (await kirill.call("GET", f"/matches/{second['match_id']}")).status_code == 404

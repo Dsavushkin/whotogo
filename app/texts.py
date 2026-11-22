@@ -104,7 +104,7 @@ def picks_buttons(picks: list) -> list:
 # ---------- notifications ----------
 
 def match_together(other, event) -> str:
-    return (f"🤝 <b>Есть пара!</b>\n{who(other)} тоже хочет пойти с вами на «{q(event.title)}» "
+    return (f"🤝 <b>Есть с кем пойти!</b>\n{who(other)} тоже хочет пойти с вами на «{q(event.title)}» "
             f"({when(event.starts_at)}).\n\nНапишите первым и договоритесь, где встретиться.")
 
 
