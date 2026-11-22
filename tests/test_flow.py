@@ -451,8 +451,12 @@ async def test_ad_sources(client):
 
 
 async def test_app_store_link(client):
-    first = await client.get("/app?c=vk_ios", follow_redirects=False)
+    iphone = {"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)"}
+    first = await client.get("/app?c=vk_ios", headers=iphone, follow_redirects=False)
     assert first.status_code == 302 and first.headers["location"].endswith("pt=127051032&mt=8&ct=vk_ios")
-    await client.get("/app?c=vk_ios", follow_redirects=False)
+    await client.get("/app?c=vk_ios", headers=iphone, follow_redirects=False)
+    android = await client.get("/app?c=vk_ios", headers={"user-agent": "Mozilla/5.0 (Linux; Android 14)"},
+                               follow_redirects=False)
+    assert android.headers["location"] == "/?utm_source=vk_ios"
     from app.channel import get_setting
     assert await get_setting("clicks:vk_ios") == "2"

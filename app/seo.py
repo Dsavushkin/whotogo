@@ -284,12 +284,16 @@ APP_CAMPAIGN = "https://apps.apple.com/app/apple-store/id6837698613?pt=127051032
 
 
 @router.get("/app")
-async def app_store(c: str = "", session: AsyncSession = Depends(get_session)):
+async def app_store(request: Request, c: str = "", session: AsyncSession = Depends(get_session)):
     """Ad link for iPhone: counts the click and opens the App Store with a campaign token,
     so installs per source show up in App Store Connect → App Analytics → Campaigns."""
     from .auth import clean_source
     from .models import Setting
     source = clean_source(c) or "site"
+    agent = request.headers.get("user-agent", "")
+    if not any(device in agent for device in ("iPhone", "iPad", "iPod")):
+        # Android and computers get the website (the app is iPhone-only)
+        return RedirectResponse(f"/?utm_source={source}", status_code=302)
     row = await session.get(Setting, f"clicks:{source}")
     if row is None:
         session.add(Setting(key=f"clicks:{source}", value="1"))
