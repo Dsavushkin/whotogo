@@ -448,3 +448,11 @@ async def test_ad_sources(client):
     async with Session() as session:
         assert (await session.execute(select(User.source).where(User.email == "ad@ex.ru"))).scalar() == "vk_ads"
     assert token
+
+
+async def test_app_store_link(client):
+    first = await client.get("/app?c=vk_ios", follow_redirects=False)
+    assert first.status_code == 302 and first.headers["location"].endswith("pt=127051032&mt=8&ct=vk_ios")
+    await client.get("/app?c=vk_ios", follow_redirects=False)
+    from app.channel import get_setting
+    assert await get_setting("clicks:vk_ios") == "2"

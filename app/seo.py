@@ -280,6 +280,25 @@ async def afisha_section(slug: str, session: AsyncSession = Depends(get_session)
     raise HTTPException(404)
 
 
+APP_CAMPAIGN = "https://apps.apple.com/app/apple-store/id6837698613?pt=127051032&mt=8&ct="
+
+
+@router.get("/app")
+async def app_store(c: str = "", session: AsyncSession = Depends(get_session)):
+    """Ad link for iPhone: counts the click and opens the App Store with a campaign token,
+    so installs per source show up in App Store Connect → App Analytics → Campaigns."""
+    from .auth import clean_source
+    from .models import Setting
+    source = clean_source(c) or "site"
+    row = await session.get(Setting, f"clicks:{source}")
+    if row is None:
+        session.add(Setting(key=f"clicks:{source}", value="1"))
+    else:
+        row.value = str(int(row.value or 0) + 1)
+    await session.commit()
+    return RedirectResponse(APP_CAMPAIGN + source, status_code=302)
+
+
 @router.get("/sitemap.xml")
 async def sitemap(session: AsyncSession = Depends(get_session)):
     base = site()

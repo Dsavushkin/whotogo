@@ -167,7 +167,12 @@ async def stats(message: Message):
         sources = (await session.execute(
             select(User.source, func.count()).where(User.created_at >= week).group_by(User.source)
             .order_by(func.count().desc()))).all()
+        from .models import Setting
+        clicks = (await session.execute(select(Setting).where(Setting.key.like("clicks:%")))).scalars().all()
     by_source = "\n".join(f"  {src or 'без метки'}: {n}" for src, n in sources) or "  —"
+    if clicks:
+        by_source += "\n\nПереходы в App Store по ссылке /app:\n" + "\n".join(
+            f"  {c.key[7:]}: {c.value}" for c in clicks)
     await message.answer(f"Пользователей: {users} (с профилем: {ready})\nБудущих событий: {events}\n"
                          f"Отметок «иду»: {marks}, из них ищут компанию: {looking}\nВзаимных пар: {pairs}\n\n"
                          f"Новые за 7 дней по источникам:\n{by_source}")
