@@ -5,7 +5,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://whotogo:${POSTGRES_PASSWORD}@db:5432/whotogo
-      WEBAPP_URL: https://${DOMAIN}
+      WEBAPP_URL: https://kompaniyana.ru  # основной адрес сайта и Mini App
       DEV: "0"
       BOT_USERNAME: whotogobot
       ADMIN_EMAILS: ${ADMIN_EMAILS:-da.savushkin4@gmail.com}
