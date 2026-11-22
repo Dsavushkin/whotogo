@@ -303,6 +303,15 @@ async def app_store(request: Request, c: str = "", session: AsyncSession = Depen
     return RedirectResponse(APP_CAMPAIGN + source, status_code=302)
 
 
+@router.get("/tg")
+async def telegram_link(s: str = ""):
+    """Ad link that survives ad-marking: platforms append ?erid=… to links, which breaks t.me/bot?startapp
+    links. This page just forwards to the bot with the source tag; extra parameters are ignored."""
+    from .auth import clean_source
+    source = clean_source(s) or "tg"
+    return RedirectResponse(f"https://t.me/{settings.bot_username}?startapp=src_{source}", status_code=302)
+
+
 @router.get("/sitemap.xml")
 async def sitemap(session: AsyncSession = Depends(get_session)):
     base = site()

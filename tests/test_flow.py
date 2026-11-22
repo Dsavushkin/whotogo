@@ -460,3 +460,8 @@ async def test_app_store_link(client):
     assert android.headers["location"] == "/?utm_source=vk_ios"
     from app.channel import get_setting
     assert await get_setting("clicks:vk_ios") == "2"
+
+
+async def test_telegram_ad_link(client):
+    moved = await client.get("/tg?s=tg_chtets&erid=2W5zFHWBHsG", follow_redirects=False)
+    assert moved.status_code == 302 and moved.headers["location"] == "https://t.me/whotogobot?startapp=src_tg_chtets"
