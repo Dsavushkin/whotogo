@@ -104,7 +104,8 @@ async def test_after_event_marks(people):
 
 async def test_feed_counts_and_people_feed(people):
     vera, anya, kirill = people
-    quiet = await add_event(hours=1, title="Тихий вечер")
+    quiet = await add_event(hours=3, title="Тихий вечер")
+    await add_event(hours=0.5, title="Уже начинается")  # less than an hour left: hidden
     busy = await add_event(hours=2, title="Шумный вечер", category="party")
     await anya.ok("POST", f"/events/{busy}/attend", json={"status": "looking"})
     await kirill.ok("POST", f"/events/{busy}/attend", json={"status": "going"})
@@ -168,11 +169,11 @@ def test_telegram_signature():
 def test_day_bounds():
     friday_evening = datetime(2026, 11, 20, 16, 0, tzinfo=timezone.utc)  # 19:00 in Moscow
     start, end = day_bounds("today", friday_evening)
-    assert (start, end) == (datetime(2026, 11, 20, 14, 0), datetime(2026, 11, 20, 21, 0))
+    assert (start, end) == (datetime(2026, 11, 20, 17, 0), datetime(2026, 11, 20, 21, 0))
     assert day_bounds("tomorrow", friday_evening) == (datetime(2026, 11, 20, 21, 0), datetime(2026, 11, 21, 21, 0))
     assert day_bounds("weekend", friday_evening) == (datetime(2026, 11, 20, 21, 0), datetime(2026, 11, 22, 21, 0))
     sunday = datetime(2026, 11, 22, 9, 0, tzinfo=timezone.utc)
-    assert day_bounds("weekend", sunday) == (datetime(2026, 11, 22, 7, 0), datetime(2026, 11, 22, 21, 0))
+    assert day_bounds("weekend", sunday) == (datetime(2026, 11, 22, 10, 0), datetime(2026, 11, 22, 21, 0))
 
 
 def test_timepad_mapping():

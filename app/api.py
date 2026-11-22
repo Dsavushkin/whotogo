@@ -36,6 +36,10 @@ def to_local_iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.replace(tzinfo=timezone.utc).astimezone(TZ).isoformat(timespec="minutes")
 
 
+# Events leave the feed an hour before they start: too late to find company.
+SOON = timedelta(hours=1)
+
+
 def day_bounds(day: str, now: Optional[datetime] = None) -> tuple[datetime, datetime]:
     """UTC-naive [from, to) for «today», «tomorrow», «weekend» or «week» in the city timezone."""
     local_now = (now or datetime.now(timezone.utc)).astimezone(TZ)
@@ -45,14 +49,14 @@ def day_bounds(day: str, now: Optional[datetime] = None) -> tuple[datetime, date
     elif day == "weekend":
         days_to_sat = (5 - midnight.weekday()) % 7
         if midnight.weekday() == 6:  # Sunday: the weekend is today
-            start, end = local_now - timedelta(hours=2), midnight + timedelta(days=1)
+            start, end = local_now + SOON, midnight + timedelta(days=1)
         else:
             sat = midnight + timedelta(days=days_to_sat)
-            start, end = (max(sat, local_now - timedelta(hours=2)), sat + timedelta(days=2))
+            start, end = (max(sat, local_now + SOON), sat + timedelta(days=2))
     elif day == "week":
-        start, end = local_now - timedelta(hours=2), midnight + timedelta(days=8)
-    else:  # today; events that began up to two hours ago still count
-        start, end = local_now - timedelta(hours=2), midnight + timedelta(days=1)
+        start, end = local_now + SOON, midnight + timedelta(days=8)
+    else:  # today
+        start, end = local_now + SOON, midnight + timedelta(days=1)
     as_utc = lambda d: d.astimezone(timezone.utc).replace(tzinfo=None)
     return as_utc(start), as_utc(end)
 
