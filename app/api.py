@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import (check_password, clean_source, current_user, exchange_code, hash_password, maybe_user, new_token,
@@ -62,7 +62,17 @@ def day_bounds(day: str, now: Optional[datetime] = None) -> tuple[datetime, date
 
 
 def user_card(u: User) -> dict:
-    return {"id": u.id, "name": u.name or "Гость", "age": u.age, "bio": u.bio, "interests": u.interests or []}
+    return {"id": u.id, "name": u.name or "Гость", "age": u.age, "bio": u.bio, "interests": u.interests or [],
+            "gender": u.gender or ""}
+
+
+def only_visible(query, me: User, girls: bool = False):
+    """«Только с девушками» people are visible only to women; `girls` narrows the list to women."""
+    if me.gender != "f":
+        query = query.where(Attendance.girls_only.is_(False))
+    if girls:
+        query = query.where(User.gender == "f")
+    return query
 
 
 def event_card(e: Event, going: int = 0, looking: int = 0) -> dict:
@@ -128,7 +138,7 @@ async def make_match(session: AsyncSession, me: User, other_id: int, event: Even
     if created:
         other = await session.get(User, other_id)
         if other:
-            text = texts.match_together(me, event) if kind == "together" else texts.match_again(me, event)
+            text = texts.match_together(me, event, match.id) if kind == "together" else texts.match_again(me, event)
             await notifier.send(other.tg_id, text, f"chat-{match.id}", button="Написать")
     return match
 
@@ -214,6 +224,7 @@ class ProfileIn(BaseModel):
     age: int = Field(ge=18, le=99)
     bio: str = Field(default="", max_length=300)
     interests: list[str] = Field(default_factory=list, max_length=8)
+    gender: Optional[str] = Field(default=None, pattern="^(f|m|)$")  # None: leave as is (older app versions)
     adult_ok: bool = False
 
 
@@ -235,6 +246,10 @@ async def put_me(body: ProfileIn, me: User = Depends(current_user), session: Asy
     me = await session.merge(me)
     me.name, me.age, me.bio = body.name.strip(), body.age, body.bio.strip()
     me.interests = [i.strip()[:24] for i in body.interests if i.strip()][:8]
+    if body.gender is not None:
+        me.gender = body.gender
+        if me.gender != "f":  # «только с девушками» is for women only
+            await session.execute(update(Attendance).where(Attendance.user_id == me.id).values(girls_only=False))
     me.adult_ok = True
     await session.commit()
     return me_card(me)
@@ -302,12 +317,13 @@ async def event_detail(event_id: int, me: Optional[User] = Depends(maybe_user),
         .where(Attendance.event_id == event.id, User.id != (me.id if me else 0)).limit(5))
     return {**event_card(event, *counts[event.id]), "description": event.description, "url": event.url,
             "source": event.source, "my_status": mine.status if mine else None,
-            "my_note": mine.note if mine else "", "faces": [u.name[:1].upper() or "?" for u in rows.scalars()]}
+            "my_note": mine.note if mine else "", "my_girls_only": bool(mine and mine.girls_only), "faces": [u.name[:1].upper() or "?" for u in rows.scalars()]}
 
 
 class AttendIn(BaseModel):
     status: str = Field(pattern="^(going|looking|none)$")
     note: str = Field(default="", max_length=200)
+    girls_only: bool = False
 
 
 @router.post("/events/{event_id}/attend")
@@ -318,20 +334,22 @@ async def attend(event_id: int, body: AttendIn, me: User = Depends(current_user)
     event = await get_event(session, event_id)
     mine = await session.get(Attendance, (me.id, event.id))
     now_looking = body.status == "looking" and (mine is None or mine.status != "looking")
+    girls_only = body.girls_only and body.status == "looking" and me.gender == "f"
     if body.status == "none":
         if mine:
             await session.delete(mine)
     elif mine:
-        mine.status, mine.note = body.status, body.note.strip()
+        mine.status, mine.note, mine.girls_only = body.status, body.note.strip(), girls_only
     else:
-        session.add(Attendance(user_id=me.id, event_id=event.id, status=body.status, note=body.note.strip()))
+        session.add(Attendance(user_id=me.id, event_id=event.id, status=body.status, note=body.note.strip(),
+                               girls_only=girls_only))
     await session.commit()
     if now_looking and event.starts_at > utcnow():
-        await tell_companions(session, me, event)
-    return {"my_status": None if body.status == "none" else body.status}
+        await tell_companions(session, me, event, girls_only)
+    return {"my_status": None if body.status == "none" else body.status, "girls_only": girls_only}
 
 
-async def tell_companions(session: AsyncSession, me: User, event: Event) -> None:
+async def tell_companions(session: AsyncSession, me: User, event: Event, girls_only: bool = False) -> None:
     """Someone new looks for company: tell the others who look for company at the same event.
     At most one such message per person and event every six hours."""
     hidden = await blocked_ids(session, me)
@@ -340,21 +358,28 @@ async def tell_companions(session: AsyncSession, me: User, event: Event) -> None
         .where(Attendance.event_id == event.id, Attendance.status == "looking", User.id != me.id,
                User.is_banned.is_(False), User.tg_id.is_not(None)).limit(30))
     for other in rows.scalars():
+        if girls_only and other.gender != "f":
+            continue
+        theirs = await session.get(Attendance, (other.id, event.id))
+        if theirs and theirs.girls_only and me.gender != "f":
+            continue
         if other.id not in hidden:
             await notifier.send(other.tg_id, texts.new_companion(me, event), f"people-{event.id}",
                                 throttle_key=f"c{event.id}", throttle_seconds=6 * 3600, button="Посмотреть")
 
 
 @router.get("/events/{event_id}/people")
-async def people(event_id: int, me: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
-    """People who look for company at this event."""
+async def people(event_id: int, girls: bool = False, me: User = Depends(current_user),
+                 session: AsyncSession = Depends(get_session)):
+    """People who look for company at this event. `girls=1`: only women."""
     require_adult(me)
     event = await get_event(session, event_id)
     hidden = await blocked_ids(session, me)
-    rows = await session.execute(
-        select(User, Attendance.note).join(Attendance, Attendance.user_id == User.id)
-        .where(Attendance.event_id == event.id, Attendance.status == "looking", User.id != me.id,
-               User.is_banned.is_(False)).order_by(Attendance.created_at.desc()).limit(100))
+    query = (select(User, Attendance.note, Attendance.girls_only).join(Attendance, Attendance.user_id == User.id)
+             .where(Attendance.event_id == event.id, Attendance.status == "looking", User.id != me.id,
+                    User.is_banned.is_(False)))
+    query = only_visible(query, me, girls)
+    rows = await session.execute(query.order_by(Attendance.created_at.desc()).limit(100))
     invited = {to for (to,) in await session.execute(select(Like.to_id).where(
         Like.from_id == me.id, Like.event_id == event.id, Like.kind == "together"))}
     matched: dict[int, int] = {}
@@ -362,8 +387,8 @@ async def people(event_id: int, me: User = Depends(current_user), session: Async
             Match.event_id == event.id, or_(Match.a_id == me.id, Match.b_id == me.id)))).scalars():
         matched[m.b_id if m.a_id == me.id else m.a_id] = m.id
     return {"event": event_card(event), "people": [
-        {**user_card(u), "note": note, "invited": u.id in invited, "match_id": matched.get(u.id)}
-        for u, note in rows if u.id not in hidden]}
+        {**user_card(u), "note": note, "girls_only": only, "invited": u.id in invited, "match_id": matched.get(u.id)}
+        for u, note, only in rows if u.id not in hidden]}
 
 
 @router.post("/events/{event_id}/invite/{user_id}")
@@ -377,6 +402,8 @@ async def invite(event_id: int, user_id: int, me: User = Depends(current_user),
     theirs = await session.get(Attendance, (user_id, event.id))
     if theirs is None or theirs.status != "looking":
         raise HTTPException(400, "Этот человек больше не ищет компанию")
+    if theirs.girls_only and me.gender != "f":
+        raise HTTPException(400, "Эта девушка ищет компанию только среди девушек")
     if await session.get(Attendance, (me.id, event.id)) is None:
         session.add(Attendance(user_id=me.id, event_id=event.id, status="looking"))
     match = await make_match(session, me, user_id, event, "together")
@@ -387,25 +414,26 @@ async def invite(event_id: int, user_id: int, me: User = Depends(current_user),
 
 
 @router.get("/people")
-async def people_feed(me: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
-    """Everyone who looks for company at upcoming events of the week."""
+async def people_feed(girls: bool = False, me: User = Depends(current_user),
+                      session: AsyncSession = Depends(get_session)):
+    """Everyone who looks for company at upcoming events of the week. `girls=1`: only women."""
     require_adult(me)
     start, end = day_bounds("week")
     hidden = await blocked_ids(session, me)
-    rows = (await session.execute(
-        select(User, Attendance.note, Event).join(Attendance, Attendance.user_id == User.id)
-        .join(Event, Event.id == Attendance.event_id)
-        .where(Attendance.status == "looking", User.id != me.id, User.is_banned.is_(False), Event.published,
-               Event.city == me.city, Event.starts_at >= start, Event.starts_at < end)
-        .order_by(Event.starts_at, Attendance.created_at.desc()).limit(150))).all()
+    query = (select(User, Attendance.note, Event, Attendance.girls_only).join(Attendance, Attendance.user_id == User.id)
+             .join(Event, Event.id == Attendance.event_id)
+             .where(Attendance.status == "looking", User.id != me.id, User.is_banned.is_(False), Event.published,
+                    Event.city == me.city, Event.starts_at >= start, Event.starts_at < end))
+    rows = (await session.execute(only_visible(query, me, girls)
+                                  .order_by(Event.starts_at, Attendance.created_at.desc()).limit(150))).all()
     invited = {(to, ev) for to, ev in await session.execute(select(Like.to_id, Like.event_id).where(
         Like.from_id == me.id, Like.kind == "together"))}
     matched = {}
     for m in (await session.execute(select(Match).where(or_(Match.a_id == me.id, Match.b_id == me.id)))).scalars():
         matched[(m.b_id if m.a_id == me.id else m.a_id, m.event_id)] = m.id
     return {"people": [
-        {**user_card(u), "note": note, "event": event_card(e), "invited": (u.id, e.id) in invited,
-         "match_id": matched.get((u.id, e.id))} for u, note, e in rows if u.id not in hidden]}
+        {**user_card(u), "note": note, "girls_only": only, "event": event_card(e), "invited": (u.id, e.id) in invited,
+         "match_id": matched.get((u.id, e.id))} for u, note, e, only in rows if u.id not in hidden]}
 
 
 @router.get("/my/events")
@@ -510,6 +538,7 @@ async def chat(match_id: int, after: int = 0, me: User = Depends(current_user),
     rows = (await session.execute(select(Message).where(Message.match_id == match.id, Message.id > after)
                                   .order_by(Message.id).limit(300))).scalars()
     return {"id": match.id, "kind": match.kind, "other": user_card(other), "event": event_card(event),
+            "icebreaker": texts.icebreaker_plain(event, match.id) if match.kind == "together" else "",
             "messages": [{"id": m.id, "mine": m.sender_id == me.id, "text": m.text,
                           "at": to_local_iso(m.created_at)} for m in rows]}
 

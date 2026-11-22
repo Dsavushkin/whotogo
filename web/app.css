@@ -150,3 +150,5 @@ textarea.input{resize:none;min-height:96px}
 .hero .poster.photo{min-height:230px}
 .event-top.photo{padding-bottom:26px;gap:120px}
 .compact .tile.photo{padding:0}
+.badge.girls{background:#FFE1EE;color:#A3245C;align-self:flex-start;margin:2px 0}
+.sys.ice{background:var(--card,#fff);color:var(--ink);border-radius:16px;padding:10px 14px;max-width:300px;text-align:left;font-size:13px;line-height:1.45}

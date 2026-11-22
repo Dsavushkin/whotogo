@@ -24,6 +24,7 @@ class User(Base):
     age: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     bio: Mapped[str] = mapped_column(String(300), default="")
     interests: Mapped[list] = mapped_column(JSON, default=list)
+    gender: Mapped[str] = mapped_column(String(1), default="")  # "f" | "m" | "" (not said)
     city: Mapped[str] = mapped_column(String(16), default="msk")
     # The person confirmed they are 18+ and accepted the terms.
     adult_ok: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -66,6 +67,8 @@ class Attendance(Base):
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), primary_key=True, index=True)
     status: Mapped[str] = mapped_column(String(16))  # "going" | "looking"
     note: Mapped[str] = mapped_column(String(200), default="")
+    # «Только с девушками»: only women see this person in «ищут компанию» and can invite her.
+    girls_only: Mapped[bool] = mapped_column(Boolean, default=False)
     checked_in: Mapped[bool] = mapped_column(Boolean, default=False)
     after_prompted: Mapped[bool] = mapped_column(Boolean, default=False)
     reminded: Mapped[bool] = mapped_column(Boolean, default=False)  # «сегодня в 19:00…» already sent

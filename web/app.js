@@ -7,7 +7,7 @@ const params = new URLSearchParams(location.search);
 const $app = document.getElementById('app');
 const $sheet = document.getElementById('sheet');
 const $toast = document.getElementById('toast');
-const state = { me: null, guest: false, dev: false, bot: 'whotogobot', day: 'today', category: '', timer: null, token: 0, authMode: 'login' };
+const state = { me: null, guest: false, dev: false, bot: 'whotogobot', day: 'today', category: '', timer: null, token: 0, authMode: 'login', girls: false };
 const inTelegram = !!(tg && tg.initData);
 const store = {
   get token() { try { return localStorage.getItem('token') || ''; } catch (e) { return ''; } },
@@ -190,7 +190,7 @@ function personCard(p, eventId, eventLine) {
   return `<article class="card">
     ${eventLine || ''}
     <div class="line" style="align-items:flex-start;gap:12px">${ava(p, 'l')}
-      <div class="col"><h2 class="strong" style="font-size:18px">${who(p)}</h2>${(p.note || p.bio) ? `<p class="small">${esc(p.note || p.bio)}</p>` : ''}</div>
+      <div class="col"><h2 class="strong" style="font-size:18px">${who(p)}</h2>${p.girls_only ? '<span class="badge girls">👭 только с девушками</span>' : ''}${(p.note || p.bio) ? `<p class="small">${esc(p.note || p.bio)}</p>` : ''}</div>
     </div>
     ${p.interests.length ? `<div class="tags">${p.interests.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
     ${button}
@@ -198,22 +198,25 @@ function personCard(p, eventId, eventLine) {
   </article>`;
 }
 const RULE = '<p class="note">Чат откроется, только если вы оба нажали «Пойдём вместе». Отказ никто не увидит.</p>';
+const isGirl = () => state.me && state.me.gender === 'f';
+const girlsQuery = () => (isGirl() && state.girls ? '?girls=1' : '');
+const girlsChip = () => (isGirl() ? `<div class="chips" style="margin:0;padding:0"><button class="chip small" data-girls aria-pressed="${state.girls}">👭 Только девушки</button></div>` : '');
 
 screens.eventPeople = async (id) => {
-  const data = await api('GET', `/events/${id}/people`);
+  const data = await api('GET', `/events/${id}/people` + girlsQuery());
   return `<div class="screen">
     <header class="head"><div class="line" style="gap:12px">${backBtn()}
       <div class="col" style="gap:2px"><span class="kicker clip">${esc(data.event.title)} · ${when(data.event.starts_at, false).toLowerCase()}</span><h1 class="display" style="font-size:24px">Ищут компанию</h1></div></div>
-      ${RULE}</header>
+      ${RULE}${girlsChip()}</header>
     <main class="body">${data.people.map((p) => personCard(p, id)).join('') || empty('Пока никого', 'Отметьте «Ищу компанию» на странице события, и другие гости увидят вас здесь.')}</main></div>`;
 };
 
 screens.people = async () => {
-  const data = await api('GET', '/people');
+  const data = await api('GET', '/people' + girlsQuery());
   const cards = data.people.map((p) => personCard(p, p.event.id,
     `<button class="line small semi muted" data-go="event/${p.event.id}" style="text-align:left"><span class="badge ink">${when(p.event.starts_at)}</span><span class="clip">${esc(p.event.title)}</span></button>`)).join('');
   return `<div class="screen with-nav">
-    <header class="head"><div class="col" style="gap:2px"><span class="kicker">На этой неделе</span><h1 class="display">Ищут компанию</h1></div>${RULE}</header>
+    <header class="head"><div class="col" style="gap:2px"><span class="kicker">На этой неделе</span><h1 class="display">Ищут компанию</h1></div>${RULE}${girlsChip()}</header>
     <main class="body">${cards || empty('Пока никого', 'Выберите событие в афише и отметьте «Ищу компанию» — так вас найдут.', '<button class="btn ink small" data-go="">Открыть афишу</button>')}</main>
     ${nav('people')}</div>`;
 };
@@ -271,7 +274,8 @@ screens.chat = async (id) => {
       addMessages(fresh.messages);
     } catch (e) { /* next tick will retry */ }
   }, 4000);
-  const quick = c.messages.length ? '' : `<div class="chips" style="margin:0">${['Привет! Где встретимся?', 'У входа за 15 минут до начала', 'Я уже внутри'].map((t) => `<button class="chip small" data-quick="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
+  const ice = c.icebreaker ? c.icebreaker.split('\n').filter((l) => l.startsWith('— ')).map((l) => l.slice(2)) : [];
+  const quick = c.messages.length ? '' : `<div class="chips" style="margin:0">${[...ice, 'Привет! Где встретимся?', 'У входа за 15 минут до начала'].map((t) => `<button class="chip small" data-quick="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
   return `<div class="screen" style="padding-top:0">
     <header class="chat-head">
       <div class="line" style="gap:12px">${backBtn('soft')}${ava(c.other, 'm')}
@@ -279,7 +283,7 @@ screens.chat = async (id) => {
         <button class="round soft" data-report="${c.other.id}" aria-label="Пожаловаться или скрыть">${ICON.more}</button></div>
       <button class="chat-event" data-go="event/${c.event.id}" style="text-align:left"><span class="small strong">${esc(c.event.title)}</span><span class="small semi muted">${when(c.event.starts_at)}${c.event.place ? ' · ' + esc(c.event.place) : ''}</span></button>
     </header>
-    <main class="msgs" id="msgs"><p class="sys">${c.kind === 'again' ? 'Чат открылся, потому что вы отметили друг друга после вечера' : 'Чат открылся, потому что вы оба захотели пойти вместе'}</p>${c.messages.map(bubble).join('')}</main>
+    <main class="msgs" id="msgs"><p class="sys">${c.kind === 'again' ? 'Чат открылся, потому что вы отметили друг друга после вечера' : 'Чат открылся, потому что вы оба захотели пойти вместе'}</p>${c.icebreaker ? `<p class="sys ice">💡 ${esc(c.icebreaker).replace(/\n/g, '<br>')}</p>` : ''}${c.messages.map(bubble).join('')}</main>
     <div class="compose">${quick}<form id="send"><label style="flex:1"><span hidden>Сообщение</span><input class="input round-input" name="text" placeholder="Сообщение" autocomplete="off" maxlength="1000" enterkeyhint="send"></label>
       <button class="round" style="background:var(--ink);color:#fff;width:52px;height:52px;border-radius:26px" aria-label="Отправить">${ICON.send}</button></form></div></div>`;
 };
@@ -325,6 +329,8 @@ function profileForm(first) {
     <form class="body" id="profile" novalidate>
       <label class="field"><span>Имя</span><input class="input" name="name" required maxlength="40" value="${esc(me.adult_ok ? me.name : (me.name && !/^User /.test(me.name) ? me.name : tgUser.first_name || ''))}" autocomplete="given-name"></label>
       <label class="field"><span>Возраст</span><input class="input" name="age" type="number" inputmode="numeric" min="18" max="99" required value="${me.age || ''}" placeholder="Например, 27"></label>
+      <div class="field"><span>Пол</span><div class="tags">${[['f', 'Девушка'], ['m', 'Парень'], ['', 'Не указывать']].map(([v, t]) => `<button type="button" class="chip small" data-gender="${v}" aria-pressed="${(me.gender || '') === v}">${t}</button>`).join('')}</div>
+        <span class="tiny semi muted">Девушки могут искать компанию только среди девушек</span></div>
       <label class="field"><span>О себе</span><textarea class="input" name="bio" maxlength="300" placeholder="Что любите, с кем хотите пойти">${esc(me.bio)}</textarea></label>
       <div class="field"><span>Интересы, до пяти</span><div class="tags">${INTERESTS.map((t) => `<button type="button" class="chip small" data-interest aria-pressed="${chosen.has(t)}">${t}</button>`).join('')}</div></div>
       ${first ? '<label class="check"><input type="checkbox" name="adult"><span>Мне есть 18 лет. Принимаю <a href="/terms" target="_blank">пользовательское соглашение</a> и <a href="/privacy" target="_blank">политику конфиденциальности</a>.</span></label>' : ''}
@@ -487,6 +493,11 @@ document.addEventListener('click', async (event) => {
   if (d.link) return tg && tg.openLink ? tg.openLink(d.link) : window.open(d.link, '_blank', 'noopener');
   if (d.tg) return tg && tg.openTelegramLink ? tg.openTelegramLink(d.tg) : window.open(d.tg, '_blank', 'noopener');
   if ('share' in d) return shareEvent(state.event);
+  if ('gender' in d) {
+    document.querySelectorAll('[data-gender]').forEach((b) => b.setAttribute('aria-pressed', String(b === el)));
+    return;
+  }
+  if ('girls' in d) { state.girls = !state.girls; return render(); }
   if ('interest' in d) {
     const on = el.getAttribute('aria-pressed') === 'true';
     if (!on && document.querySelectorAll('[data-interest][aria-pressed=true]').length >= 5) return toast('Можно выбрать до пяти');
@@ -509,12 +520,14 @@ document.addEventListener('click', async (event) => {
     const e = state.event;
     return sheet(`<h2 class="strong">Ищу компанию</h2><p class="muted">Вас увидят гости этого события. Напишите пару слов — так проще откликнуться.</p>
       <label class="field"><span>Сообщение гостям</span><textarea class="input" id="note" maxlength="200" placeholder="Иду первый раз, хочу компанию из 2–3 человек">${esc(e.my_note)}</textarea></label>
+      ${isGirl() ? `<label class="check"><input type="checkbox" id="girls-only" ${e.my_girls_only ? 'checked' : ''}><span>👭 Только с девушками — меня увидят и позовут только девушки</span></label>` : ''}
       <button class="btn ink" data-looking-save="${e.id}">${e.my_status === 'looking' ? 'Сохранить' : 'Показать меня гостям'}</button>
       ${e.my_status === 'looking' ? `<button class="btn text danger" data-looking-stop="${e.id}">Больше не ищу</button>` : '<button class="btn text" data-close>Отмена</button>'}`);
   }
   if (d.lookingSave) {
     const note = document.getElementById('note').value;
-    if (await act(() => api('POST', `/events/${d.lookingSave}/attend`, { status: 'looking', note }))) { haptic(); closeSheet(); go(`event/${d.lookingSave}/people`); }
+    const only = document.getElementById('girls-only');
+    if (await act(() => api('POST', `/events/${d.lookingSave}/attend`, { status: 'looking', note, girls_only: !!(only && only.checked) }))) { haptic(); closeSheet(); go(`event/${d.lookingSave}/people`); }
     return;
   }
   if (d.lookingStop) {
@@ -604,8 +617,10 @@ document.addEventListener('submit', async (event) => {
     if (age > 99) return formError('Проверьте возраст.');
     if (first && !f.get('adult')) return formError('Подтвердите возраст и согласие с правилами.');
     const interests = [...form.querySelectorAll('[data-interest][aria-pressed=true]')].map((b) => b.textContent);
+    const picked = form.querySelector('[data-gender][aria-pressed=true]');
+    const gender = picked ? picked.dataset.gender : '';
     try {
-      state.me = await api('PUT', '/me', { name: String(f.get('name')).trim(), age, bio: String(f.get('bio')), interests, adult_ok: true });
+      state.me = await api('PUT', '/me', { name: String(f.get('name')).trim(), age, bio: String(f.get('bio')), interests, gender, adult_ok: true });
     } catch (e) { return formError(e.message); }
     if (first) return render();
     toast('Сохранено');

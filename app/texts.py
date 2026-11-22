@@ -112,11 +112,53 @@ def picks_buttons(picks: list) -> list:
     return [(f"{n}. {event.title}"[:60], f"event-{event.id}") for n, (event, _, _) in enumerate(picks, 1)]
 
 
+# ---------- icebreakers: two questions to start the chat ----------
+
+ICEBREAKERS = {
+    "music": ["Какую песню ждёшь больше всего?", "Лучший концерт, на котором ты был?",
+              "Что сейчас слушаешь по дороге?", "Танцуешь или стоишь у бара?"],
+    "party": ["Под какую песню точно выйдешь танцевать?", "Ты больше «до утра» или «до метро»?",
+              "Лучшая вечеринка в твоей жизни — где это было?", "Что пьёшь, чтобы взять тебе тоже?"],
+    "food": ["Какое блюдо попробуешь первым?", "Лучшее место в Москве, где ты ел?",
+             "Готовишь сам или только пробуешь?", "Сладкое или острое?"],
+    "games": ["Ты играешь на победу или ради веселья?", "Любимая настолка или квиз?",
+              "В какой теме ты эксперт?", "Как назовём команду?"],
+    "art": ["Какая выставка последней зацепила?", "Ты читаешь подписи к картинам или просто смотришь?",
+            "Любимый художник или музей?", "Куда пойдём после — кофе или прогулка?"],
+    "theater": ["Последний спектакль, который запомнился?", "Ты читал пьесу заранее?",
+                "Партер или балкон?", "Обсудим в антракте или после?"],
+    "cinema": ["Последний фильм, который зацепил?", "Попкорн сладкий или солёный?",
+               "Какой фильм пересматриваешь много раз?", "Ты остаёшься на титры?"],
+    "talk": ["Что хочешь узнать на этой лекции?", "О чём ты мог бы прочитать лекцию сам?",
+             "Последняя книга или подкаст, который понравился?", "Задашь вопрос лектору?"],
+    "sport": ["За кого болеешь или чем занимаешься?", "Самый крутой матч, который ты видел?",
+              "Утренние тренировки — это про тебя?", "Чем отметим победу?"],
+    "walk": ["Любимое место в Москве для прогулок?", "Где выпьем кофе по пути?",
+             "Ты больше город или парк?", "Какой район хочешь открыть?"],
+}
+ICEBREAKERS_ANY = ["Что тебя зацепило в этом событии?", "Как обычно проводишь выходные?",
+                   "Куда в Москве ты бы сводил друга, который приехал впервые?", "Где встретимся — у входа?"]
+
+
+def icebreaker_questions(event, seed: int = 0) -> list[str]:
+    """Two questions picked by the event's category; `seed` (the chat id) keeps the pair stable."""
+    pool = ICEBREAKERS.get(getattr(event, "category", ""), ICEBREAKERS_ANY)
+    first = seed % len(pool)
+    return [pool[first], pool[(first + 1) % len(pool)]]
+
+
+def icebreaker_plain(event, seed: int = 0) -> str:
+    first, second = icebreaker_questions(event, seed)
+    return f"Вы оба идёте на «{event.title}». Чтобы начать разговор:\n— {first}\n— {second}"
+
+
 # ---------- notifications ----------
 
-def match_together(other, event) -> str:
+def match_together(other, event, seed: int = 0) -> str:
+    first, _ = icebreaker_questions(event, seed)
     return (f"🤝 <b>Есть с кем пойти!</b>\n{who(other)} тоже хочет пойти с вами на «{q(event.title)}» "
-            f"({when(event.starts_at)}).\n\nНапишите первым и договоритесь, где встретиться.")
+            f"({when(event.starts_at)}).\n\nНапишите первым и договоритесь, где встретиться.\n"
+            f"<i>Можно начать с вопроса: {q(first)}</i>")
 
 
 def match_again(other, event) -> str:
@@ -147,7 +189,9 @@ def day_reminder(event, partners: list, looking: int, status: str) -> str:
         head += f"\n📍 {q(place)}"
     if partners:
         names = ", ".join(q(p.name or "Гость") for p in partners)
-        return f"{head}\n\nИдёте вместе с: {names}. Договоритесь, где встретиться."
+        _, second = icebreaker_questions(event, event.id)
+        return (f"{head}\n\nИдёте вместе с: {names}. Договоритесь, где встретиться."
+                f"\n\n💡 <i>О чём поговорить: {q(second)}</i>")
     if status == "looking" and looking:
         return f"{head}\n\nКомпанию ищут ещё {looking} — посмотрите, с кем можно пойти."
     if status == "looking":

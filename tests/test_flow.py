@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 from app.api import day_bounds
 from app.auth import verify_init_data
 from app.jobs import send_after_prompts
+from app import texts
 from app.notify import notifier
 from app.sources.timepad import price_text, short, to_event
 from tests.conftest import Person, add_event
@@ -472,3 +473,38 @@ async def test_telegram_ad_link_survives_marking(client):
     for url in ("/tg/tg_telega", "/tg/tg_telega?erid=2W5zFHWBHsG", "/?erid=2W5zFHWBHsG/tg/tg_telega"):
         moved = await client.get(url, follow_redirects=False)
         assert moved.headers["location"] == "https://t.me/whotogobot?startapp=src_tg_telega", url
+
+
+async def test_girls_only(people):
+    vera, anya, kirill = people
+    for person, gender in ((vera, "f"), (anya, "f"), (kirill, "m")):
+        await person.ok("PUT", "/me", json={"name": person.name, "age": 28, "gender": gender, "adult_ok": True})
+    event = await add_event(category="music")
+    saved = await vera.ok("POST", f"/events/{event}/attend", json={"status": "looking", "girls_only": True})
+    assert saved["girls_only"] is True
+    # A man does not see her and cannot invite her; a woman can.
+    assert (await kirill.ok("GET", f"/events/{event}/people"))["people"] == []
+    assert (await kirill.ok("GET", "/people"))["people"] == []
+    assert (await kirill.call("POST", f"/events/{event}/invite/{vera.id}")).status_code == 400
+    seen = (await anya.ok("GET", f"/events/{event}/people"))["people"]
+    assert [p["name"] for p in seen] == ["Вера"] and seen[0]["girls_only"] is True
+    # A man cannot turn the option on for himself.
+    assert (await kirill.ok("POST", f"/events/{event}/attend", json={"status": "looking", "girls_only": True}))["girls_only"] is False
+    # «Только девушки» filter hides men.
+    assert [p["name"] for p in (await anya.ok("GET", "/people", params={"girls": 1}))["people"]] == ["Вера"]
+    assert {p["name"] for p in (await anya.ok("GET", "/people"))["people"]} == {"Вера", "Кирилл"}
+    # Changing gender away from «девушка» drops the option.
+    await vera.ok("PUT", "/me", json={"name": "Вера", "age": 28, "gender": "", "adult_ok": True})
+    assert [p["name"] for p in (await kirill.ok("GET", f"/events/{event}/people"))["people"]] == ["Вера"]
+
+
+async def test_icebreaker(people):
+    vera, anya, _ = people
+    event = await add_event(category="cinema")
+    await vera.ok("POST", f"/events/{event}/attend", json={"status": "looking"})
+    await anya.ok("POST", f"/events/{event}/invite/{vera.id}")
+    match = (await vera.ok("POST", f"/events/{event}/invite/{anya.id}"))["match_id"]
+    chat = await vera.ok("GET", f"/matches/{match}")
+    lines = [line[2:] for line in chat["icebreaker"].split("\n") if line.startswith("— ")]
+    assert len(lines) == 2 and all(q in texts.ICEBREAKERS["cinema"] for q in lines)
+    assert "Можно начать с вопроса" in notifier.sent[-1][1]
