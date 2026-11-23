@@ -681,7 +681,12 @@ async def test_invite_link_page(client):
     links = await a.ok("GET", f"/events/{event}/invite")
     code = links["link"].split("fr_")[1].split("_")[0]
     assert links["link"].endswith(f"_e{event}") and links["web_link"].endswith(f"/i/{code}?e={event}")
-    landing = await client.get(f"/i/{code}", params={"e": event})
+    iphone = await client.get(f"/i/{code}", params={"e": event}, headers={"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0)"})
+    assert iphone.status_code == 302 and iphone.headers["location"].startswith("https://apps.apple.com/") \
+        and iphone.headers["location"].endswith("ct=invite")
+    android = await client.get(f"/i/{code}", params={"e": event}, headers={"user-agent": "Mozilla/5.0 (Linux; Android 14)"})
+    assert android.status_code == 302 and android.headers["location"] == f"/?fr={code}&go=event-{event}"
+    landing = await client.get(f"/i/{code}", params={"e": event}, headers={"user-agent": "TelegramBot (like TwitterBot)"})
     assert landing.status_code == 200 and "Аня зовёт тебя" in landing.text and "Квиз в Депо" in landing.text
     assert f"startapp=fr_{code}_e{event}" in landing.text and "apps.apple.com" in landing.text
     general = (await a.ok("GET", "/friends"))["web_link"]

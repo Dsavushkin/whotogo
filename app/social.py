@@ -7,7 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from html import escape as esc
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field
@@ -251,17 +251,29 @@ async def achievement_picture(code: str, level: int):
 
 # ---------- invite landing page ----------
 
+# Messengers fetch a link to draw its preview: they get the page with the picture instead of a redirect.
+PREVIEW_BOTS = ("TelegramBot", "WhatsApp", "facebookexternalhit", "Facebot", "Twitterbot", "vkShare", "Slackbot",
+                "Discordbot", "LinkedInBot", "SkypeUriPreview", "Viber", "YandexBot", "Googlebot", "bingbot")
+
+
 @pictures.get("/i/{code}", response_class=HTMLResponse)
 async def invite_page(code: str, request: Request, g: Optional[int] = None, e: Optional[int] = None,
                       session: AsyncSession = Depends(get_session)):
-    """Where a friend's link leads outside Telegram: choose Telegram, the iPhone app or the site."""
-    from .seo import APP_STORE, page
+    """A friend's link outside Telegram: an iPhone goes to the App Store, anything else to the site
+    (signed in there, the friend becomes a friend). Link previews get a page with the invitation."""
+    from .seo import APP_CAMPAIGN, APP_STORE, page
     inviter = (await session.execute(select(User).where(User.invite_code == code[:16]))).scalar_one_or_none()
     name = (inviter.name or "Друг") if inviter and not inviter.is_banned else "Друг"
     event = await session.get(Event, e) if e else None
     links = invite_links(code[:16], g, event.id if event else None)
     web = f"/?fr={code[:16]}" + (f"&g={g}" if g else "") + (f"&go=event-{event.id}" if event else "")
-    await bump(session, "clicks:invite_page")
+    agent = request.headers.get("user-agent", "")
+    if not any(bot in agent for bot in PREVIEW_BOTS):  # people go straight on; link previews get the page below
+        if any(d in agent for d in ("iPhone", "iPad", "iPod")):
+            await bump(session, "clicks:invite_ios")
+            return RedirectResponse(APP_CAMPAIGN + "invite", 302)
+        await bump(session, "clicks:invite_web")
+        return RedirectResponse(web, 302)
     what = (f"на «{esc(event.title)}» — {esc(texts.when(event.starts_at))}" if event
             else "в «Кто идёт» — находить компанию на концерты, квизы, выставки и вечеринки в Москве")
     body = f"""<section class="invite">
