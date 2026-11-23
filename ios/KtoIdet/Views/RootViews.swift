@@ -81,6 +81,9 @@ enum Route: Hashable {
     case people(Int)
     case chat(Int)
     case after(Int)
+    case group(Int)
+    case friends
+    case achievements
 }
 
 extension View {
@@ -92,6 +95,9 @@ extension View {
             case .people(let id): PeopleView(eventId: id)
             case .chat(let id): ChatView(matchId: id)
             case .after(let id): AfterView(eventId: id)
+            case .group(let id): GroupChatView(groupId: id)
+            case .friends: FriendsView()
+            case .achievements: AchievementsView()
             }
         }
     }
@@ -308,6 +314,7 @@ struct ProfileFormView: View {
     @State private var age = ""
     @State private var bio = ""
     @State private var chosen: [String] = []
+    @State private var gender = ""
     @State private var adult = false
     @State private var busy = false
     @State private var failure: String?
@@ -329,6 +336,17 @@ struct ProfileFormView: View {
                 }
                 Field(title: "Возраст") {
                     TextField("Например, 27", text: $age).keyboardType(.numberPad)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Пол").font(.ui(13, .bold)).foregroundStyle(Color.muted)
+                    HStack(spacing: 8) {
+                        Chip(title: "Девушка", selected: gender == "f", small: true) { gender = "f" }
+                        Chip(title: "Парень", selected: gender == "m", small: true) { gender = "m" }
+                        Chip(title: "Не указывать", selected: gender.isEmpty, small: true) { gender = "" }
+                    }
+                    Text("Девушки могут искать компанию только среди девушек")
+                        .font(.ui(12, .semibold))
+                        .foregroundStyle(Color.muted)
                 }
                 Field(title: "О себе") {
                     TextField("Что любите, с кем хотите пойти", text: $bio, axis: .vertical).lineLimit(3...6)
@@ -376,6 +394,7 @@ struct ProfileFormView: View {
         age = me.age.map { String($0) } ?? ""
         bio = me.bio
         chosen = me.interests
+        gender = me.gender ?? ""
     }
 
     private func toggle(_ tag: String) {
@@ -397,7 +416,7 @@ struct ProfileFormView: View {
         busy = true
         failure = nil
         do {
-            try await model.saveProfile(name: cleanName, age: years, bio: bio, interests: chosen)
+            try await model.saveProfile(name: cleanName, age: years, bio: bio, interests: chosen, gender: gender)
             if !first {
                 model.say("Сохранено")
                 dismiss()
@@ -417,8 +436,12 @@ struct AfishaView: View {
     @State private var category = ""
     @State private var data: EventsResponse?
     @State private var failure: String?
+    /// Late evening nothing is left today: the afisha opens on tomorrow and hides «Сегодня» until the date changes.
+    @State private var noToday: Date?
 
-    private let days = [("today", "Сегодня"), ("tomorrow", "Завтра"), ("weekend", "Выходные"), ("week", "Неделя")]
+    private let allDays = [("today", "Сегодня"), ("tomorrow", "Завтра"), ("weekend", "Выходные"), ("week", "Неделя")]
+    private var todayGone: Bool { noToday == Calendar.current.startOfDay(for: Date()) }
+    private var days: [(String, String)] { todayGone ? allDays.filter { $0.0 != "today" } : allDays }
     private let titles = ["today": "Куда сегодня?", "tomorrow": "Куда завтра?", "weekend": "Куда на выходных?",
                           "week": "Куда на неделе?"]
 
@@ -438,6 +461,13 @@ struct AfishaView: View {
                             .padding(.horizontal, 18)
                             .frame(height: 44)
                             .background(Color.ink, in: Capsule())
+                    } else {
+                        Button("👋 Позвать друга") { Task { await model.inviteFriend() } }
+                            .font(.ui(14, .bold))
+                            .foregroundStyle(Color.ink)
+                            .padding(.horizontal, 14)
+                            .frame(height: 40)
+                            .background(Color.sun, in: Capsule())
                     }
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -500,9 +530,20 @@ struct AfishaView: View {
 
     private func load() async {
         failure = nil
+        if todayGone && day == "today" { day = "tomorrow"; return }  // the new task loads tomorrow
         let query = "/events?day=\(day)" + (category.isEmpty ? "" : "&category=\(category)")
         do {
-            data = try await API.call("GET", query)
+            let answer: EventsResponse = try await API.call("GET", query)
+            if day == "today" && answer.events.isEmpty {
+                var all = answer
+                if !category.isEmpty { all = try await API.call("GET", "/events?day=today") }
+                if all.events.isEmpty {
+                    noToday = Calendar.current.startOfDay(for: Date())
+                    day = "tomorrow"
+                    return
+                }
+            }
+            data = answer
         } catch is CancellationError {
         } catch {
             if data == nil { failure = error.localizedDescription }
@@ -547,6 +588,7 @@ struct HeroCard: View {
                         Text(lookingText(event.looking)).font(.ui(13, .heavy)).foregroundStyle(Color.cobaltInk)
                     }
                 }
+                CardMarks(event: event)
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 14)
@@ -591,10 +633,30 @@ struct CompactCard: View {
                 } else {
                     Text(event.place).font(.ui(13, .semibold)).foregroundStyle(Color.muted).lineLimit(1)
                 }
+                CardMarks(event: event)
             }
             Spacer(minLength: 0)
         }
         .padding(12)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+    }
+}
+
+/// Small marks on an afisha card: friends who go and the group-ticket offer.
+struct CardMarks: View {
+    let event: EventCard
+
+    var body: some View {
+        let friends = event.friends?.count ?? 0
+        if friends > 0 || !event.deal.isEmpty {
+            FlowLayout(spacing: 6) {
+                if friends > 0 {
+                    Badge(text: "👋 \(friends) " + plural(friends, "друг", "друга", "друзей"), fill: .sun)
+                }
+                if !event.deal.isEmpty {
+                    Badge(text: "🎟 " + event.deal, fill: .lime)
+                }
+            }
+        }
     }
 }

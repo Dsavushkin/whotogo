@@ -6,7 +6,7 @@ import Security
 
 enum Config {
     /// Server address. Change here when the service moves to its own domain.
-    static let baseURL = URL(string: "https://111-88-80-60.sslip.io")!
+    static let baseURL = URL(string: "https://kompaniyana.ru")!
     static let bot = "whotogobot"
     static let cityTimeZone = TimeZone(identifier: "Europe/Moscow")!
 }
@@ -19,6 +19,7 @@ struct Person: Codable, Identifiable, Hashable {
     let age: Int?
     let bio: String
     let interests: [String]
+    var gender: String? = nil
 
     var title: String { age.map { "\(name), \($0)" } ?? name }
     var initial: String { String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased() }
@@ -34,8 +35,11 @@ struct Me: Codable, Hashable {
     var isOrganizer: Bool
     var isAdmin: Bool
     var nudges: Bool?
+    var gender: String?
+    var captainOk: Bool?
 
-    var person: Person { Person(id: id, name: name, age: age, bio: bio, interests: interests) }
+    var person: Person { Person(id: id, name: name, age: age, bio: bio, interests: interests, gender: gender) }
+    var isGirl: Bool { gender == "f" }
 }
 
 struct EventCard: Codable, Identifiable, Hashable {
@@ -58,6 +62,58 @@ struct EventCard: Codable, Identifiable, Hashable {
     var myStatus: String?
     var myNote: String?
     var faces: [String]?
+    // Companies, friends, group tickets.
+    var groupDeal: String?
+    var friends: Friends?
+    var group: GroupInfo?
+    var waiting: Bool?
+    var waitingCount: Int?
+    var myGirlsOnly: Bool?
+
+    var deal: String { groupDeal ?? "" }
+}
+
+/// In the afisha the number of friends who go; on the event page the friends themselves.
+enum Friends: Codable, Hashable {
+    case count(Int)
+    case people([Person])
+
+    init(from decoder: Decoder) throws {
+        let box = try decoder.singleValueContainer()
+        if let number = try? box.decode(Int.self) {
+            self = .count(number)
+        } else {
+            self = .people((try? box.decode([Person].self)) ?? [])
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var box = encoder.singleValueContainer()
+        switch self {
+        case .count(let number): try box.encode(number)
+        case .people(let list): try box.encode(list)
+        }
+    }
+
+    var count: Int {
+        switch self {
+        case .count(let number): return number
+        case .people(let list): return list.count
+        }
+    }
+
+    var people: [Person] {
+        if case .people(let list) = self { return list }
+        return []
+    }
+}
+
+/// My company on the event page.
+struct GroupInfo: Codable, Hashable {
+    let id: Int
+    let size: Int
+    let others: [Person]
+    var captainId: Int?
 }
 
 struct Seeker: Codable, Hashable {
@@ -70,8 +126,10 @@ struct Seeker: Codable, Hashable {
     var invited: Bool
     var matchId: Int?
     let event: EventCard?
+    var girlsOnly: Bool?
+    var gender: String?
 
-    var person: Person { Person(id: id, name: name, age: age, bio: bio, interests: interests) }
+    var person: Person { Person(id: id, name: name, age: age, bio: bio, interests: interests, gender: gender) }
     var key: String { "\(id)-\(event?.id ?? 0)" }
 }
 
@@ -108,7 +166,101 @@ struct ChatData: Codable, Hashable {
     let kind: String
     let other: Person
     let event: EventCard
+    var icebreaker: String?
     var messages: [ChatMessage]
+}
+
+// Companies of 3–5 people.
+
+struct GroupRow: Codable, Identifiable, Hashable {
+    let id: Int
+    let event: EventCard
+    let others: [Person]
+    let last: String
+    let lastFrom: String?
+    let at: String
+}
+
+struct GroupMessage: Codable, Identifiable, Hashable {
+    let id: Int
+    let mine: Bool
+    let from: String
+    let fromId: Int
+    let text: String
+    let at: String
+}
+
+struct GroupChat: Codable, Hashable {
+    let id: Int
+    let event: EventCard
+    let girlsOnly: Bool
+    var captainId: Int?
+    let deal: String
+    let promo: String
+    let full: Bool
+    let others: [Person]
+    let icebreaker: String
+    var messages: [GroupMessage]
+
+    var captain: Person? { others.first { $0.id == captainId } }
+}
+
+struct GroupsResponse: Codable { let groups: [GroupRow] }
+struct AttendAnswer: Codable { let myStatus: String?; let group: GroupInfo? }
+
+// Friends and achievements.
+
+struct InviteLinks: Codable, Hashable { let link: String; let webLink: String }
+
+struct FriendGoing: Codable, Hashable {
+    let friend: Person
+    let event: EventCard
+}
+
+struct FriendsResponse: Codable {
+    let link: String
+    let webLink: String
+    let friends: [Person]
+    let going: [FriendGoing]
+}
+
+struct AchievementStep: Codable, Hashable {
+    let need: Int
+    let title: String
+    let done: Bool
+}
+
+struct Achievement: Codable, Identifiable, Hashable {
+    let code: String
+    let emoji: String
+    let level: Int
+    let levels: Int
+    let title: String
+    let value: Int
+    let next: Int?
+    let nextTitle: String?
+    let unit: String
+    let hint: String
+    let steps: [AchievementStep]
+
+    var id: String { code }
+    var progress: Double {
+        guard let next, next > 0 else { return 1 }
+        return min(1, Double(value) / Double(next))
+    }
+}
+
+struct CaptainInfo: Codable, Hashable {
+    let ready: Bool
+    let on: Bool
+    let events: Int
+    let need: Int
+}
+
+struct ProgressResponse: Codable {
+    let achievements: [Achievement]
+    let captain: CaptainInfo
+    let invite: InviteLinks
 }
 
 struct EventsResponse: Codable {
@@ -319,11 +471,33 @@ final class AppModel {
         apply(me)
     }
 
-    func saveProfile(name: String, age: Int, bio: String, interests: [String]) async throws {
+    func saveProfile(name: String, age: Int, bio: String, interests: [String], gender: String) async throws {
         let me: Me = try await API.call("PUT", "/me", body: [
-            "name": name, "age": age, "bio": bio, "interests": interests, "adult_ok": true,
+            "name": name, "age": age, "bio": bio, "interests": interests, "gender": gender, "adult_ok": true,
         ])
         apply(me)
+    }
+
+    func setCaptain(_ on: Bool) async {
+        do {
+            let updated: Me = try await API.call("PUT", "/me/settings", body: ["captain_ok": on])
+            me = updated
+            say(on ? "Теперь вы можете стать капитаном компании" : "Капитанство выключено")
+        } catch {
+            say(error.localizedDescription)
+        }
+    }
+
+    /// «Позвать друга»: the personal link (an iPhone goes to the App Store, anything else to the site).
+    func inviteFriend() async {
+        guard !isGuest else { showLogin = true; return }
+        do {
+            let links: FriendsResponse = try await API.call("GET", "/friends")
+            Share.present(text: "Я нахожу компанию на концерты, квизы и выставки в «Кто идёт». Присоединяйся — пойдём вместе",
+                          link: links.webLink)
+        } catch {
+            say(error.localizedDescription)
+        }
     }
 
     /// «Куда идёте на выходных?» reminders on this iPhone.

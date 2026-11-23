@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ChatsView: View {
     @State private var matches: [MatchRow]?
+    @State private var groups: [GroupRow] = []
     @State private var past: [EventCard] = []
     @State private var failure: String?
 
@@ -23,8 +24,12 @@ struct ChatsView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                ForEach(groups) { group in
+                    NavigationLink(value: Route.group(group.id)) { groupRow(group) }
+                        .buttonStyle(.plain)
+                }
                 if let matches {
-                    if matches.isEmpty && past.isEmpty {
+                    if matches.isEmpty && past.isEmpty && groups.isEmpty {
                         EmptyNote(title: "Чатов пока нет",
                                   text: "Чат открывается, когда вы и другой гость оба нажали «Пойдём вместе».")
                     }
@@ -66,10 +71,35 @@ struct ChatsView: View {
         .background(Color.white, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
+    private func groupRow(_ group: GroupRow) -> some View {
+        HStack(spacing: 14) {
+            HStack(spacing: -14) {
+                ForEach(group.others.prefix(2)) { person in Avatar(person: person, size: 40) }
+            }
+            .frame(width: 56, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("👥 " + group.event.title).font(.ui(16, .heavy)).foregroundStyle(Color.ink).lineLimit(1)
+                    Spacer()
+                    Text(When.label(group.at, time: false)).font(.ui(12, .bold)).foregroundStyle(Color.muted)
+                }
+                Text(group.last.isEmpty ? "Компания: вы, " + group.others.map(\.name).joined(separator: ", ")
+                                        : (group.lastFrom.map { $0 + ": " } ?? "") + group.last)
+                    .font(.ui(13, .semibold))
+                    .foregroundStyle(Color.muted)
+                    .lineLimit(1)
+            }
+        }
+        .padding(12)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
     private func load() async {
         do {
             let list: MatchesResponse = try await API.call("GET", "/matches")
             let mine: MyEvents = try await API.call("GET", "/my/events")
+            let companies: GroupsResponse? = try? await API.call("GET", "/groups")
+            groups = companies?.groups ?? []
             matches = list.matches
             past = mine.past
             failure = nil
@@ -118,6 +148,10 @@ struct ChatView: View {
                                 .padding(.vertical, 6)
                                 .padding(.horizontal, 40)
 
+                            if let ice = chat.icebreaker, !ice.isEmpty {
+                                IcebreakerNote(text: ice)
+                            }
+
                             ForEach(chat.messages) { message in
                                 bubble(message).id(message.id)
                             }
@@ -131,7 +165,7 @@ struct ChatView: View {
                         if let last = chat.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
                     }
                 }
-                composer(showQuick: chat.messages.isEmpty)
+                composer(showQuick: chat.messages.isEmpty, extra: icebreakerQuestions(chat.icebreaker))
             } else if let failure {
                 EmptyNote(title: "Не получилось загрузить", text: failure)
                 Spacer()
@@ -171,12 +205,12 @@ struct ChatView: View {
         }
     }
 
-    private func composer(showQuick: Bool) -> some View {
+    private func composer(showQuick: Bool, extra: [String] = []) -> some View {
         VStack(spacing: 8) {
             if showQuick {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(quick, id: \.self) { phrase in
+                        ForEach(extra + quick, id: \.self) { phrase in
                             Chip(title: phrase, selected: false, small: true) { Task { await send(phrase) } }
                         }
                     }
@@ -303,8 +337,12 @@ struct ProfileView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
     @State private var upcoming: [EventCard] = []
+    @State private var progress: ProgressResponse?
+    @State private var chosen: Achievement?
     @State private var editing = false
     @State private var confirmDelete = false
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 2)
 
     var body: some View {
         ScrollView {
@@ -326,6 +364,25 @@ struct ProfileView: View {
                             .buttonStyle(BigButtonStyle(fill: .soft, ink: .ink, height: 52))
                     }
                 }
+                Button { Task { await model.inviteFriend() } } label: {
+                    Card(fill: .sun) {
+                        Text("👋 Позвать друга").font(.ui(18, .heavy)).foregroundStyle(Color.ink)
+                        Text("Отправьте ссылку на «Кто идёт» — ходить вместе веселее. Друг появится у вас в друзьях, а вы получите достижение.")
+                            .font(.ui(14, .semibold))
+                            .foregroundStyle(Color.ink)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+                .buttonStyle(.plain)
+                if let progress { achievements(progress) }
+                NavigationLink(value: Route.friends) {
+                    Card {
+                        Text("👋 Друзья →").font(.ui(17, .heavy)).foregroundStyle(Color.ink)
+                        Text("Позвать друзей и посмотреть, кто куда идёт").font(.ui(14)).foregroundStyle(Color.muted)
+                    }
+                }
+                .buttonStyle(.plain)
+                if let progress { captainCard(progress.captain) }
                 Card {
                     Toggle(isOn: Binding(get: { model.me?.nudges ?? true },
                                          set: { value in Task { await model.setNudges(value) } })) {
@@ -386,9 +443,11 @@ struct ProfileView: View {
         .screenBackground()
         .toolbar(.hidden, for: .navigationBar)
         .task { await load() }
+        .refreshable { await load() }
         .sheet(isPresented: $editing) {
             ProfileFormView(first: false).environment(model)
         }
+        .sheet(item: $chosen) { item in AchievementSheet(item: item).environment(model) }
         .confirmationDialog("Удалить аккаунт?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Удалить всё", role: .destructive) {
                 Task {
@@ -401,9 +460,78 @@ struct ProfileView: View {
         }
     }
 
+    private func achievements(_ data: ProgressResponse) -> some View {
+        let got = data.achievements.filter { $0.level > 0 }
+        let top = Array((got + data.achievements.filter { $0.level == 0 }).prefix(4))
+        return Card {
+            HStack {
+                Text("Достижения · \(got.count) из \(data.achievements.count)").font(.ui(17, .heavy)).foregroundStyle(Color.ink)
+                Spacer()
+                NavigationLink(value: Route.achievements) {
+                    Text("Все").font(.ui(15, .heavy)).foregroundStyle(Color.cobaltInk)
+                }
+            }
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(top) { item in
+                    Button { chosen = item } label: { AchievementTile(item: item) }
+                        .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func captainCard(_ captain: CaptainInfo) -> some View {
+        Card {
+            if captain.ready {
+                Toggle(isOn: Binding(get: { model.me?.captainOk ?? false },
+                                     set: { value in Task { await model.setCaptain(value) } })) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("⭐ Быть капитаном компаний").font(.ui(16, .heavy)).foregroundStyle(Color.ink)
+                        Text("Вы уже бывали на встречах. Капитан встречает компанию у входа и знакомит всех — так новичкам спокойнее.")
+                            .font(.ui(13))
+                            .foregroundStyle(Color.muted)
+                    }
+                }
+                .tint(.cobalt)
+            } else {
+                Text("⭐ Капитан компании").font(.ui(16, .heavy)).foregroundStyle(Color.ink)
+                Text("Станет доступно после \(captain.need) событий. Сейчас: \(captain.events) из \(captain.need).")
+                    .font(.ui(13))
+                    .foregroundStyle(Color.muted)
+                ProgressBar(value: Double(captain.events) / Double(max(1, captain.need)))
+            }
+        }
+    }
+
     private func load() async {
         if let mine: MyEvents = try? await API.call("GET", "/my/events") {
             upcoming = mine.upcoming
         }
+        if let answer: ProgressResponse = try? await API.call("GET", "/me/progress") {
+            progress = answer
+        }
     }
+}
+
+// MARK: - Icebreaker
+
+/// Two questions to start the conversation; the server picks them by the kind of event.
+struct IcebreakerNote: View {
+    let text: String
+
+    var body: some View {
+        Text("💡 " + text)
+            .font(.ui(13, .semibold))
+            .foregroundStyle(Color.ink)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: 320, alignment: .leading)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+/// «— вопрос» lines of an icebreaker, offered as quick replies.
+func icebreakerQuestions(_ text: String?) -> [String] {
+    (text ?? "").split(separator: "\n").map(String.init).filter { $0.hasPrefix("— ") }.map { String($0.dropFirst(2)) }
 }

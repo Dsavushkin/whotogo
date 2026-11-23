@@ -10,7 +10,10 @@ struct EventView: View {
     @State private var failure: String?
     @State private var askNote = false
     @State private var note = ""
+    @State private var girlsOnly = false
     @State private var showPeople = false
+    @State private var askCompany = false
+    @State private var openGroup: Int?
 
     var body: some View {
         Group {
@@ -26,7 +29,22 @@ struct EventView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .navigationDestination(isPresented: $showPeople) { PeopleView(eventId: eventId) }
+        .navigationDestination(item: $openGroup) { id in GroupChatView(groupId: id) }
         .sheet(isPresented: $askNote) { noteSheet }
+        .confirmationDialog("Соберём компанию", isPresented: $askCompany, titleVisibility: .visible) {
+            Button("С кем угодно") { Task { await joinCompany(girlsOnly: false) } }
+            Button("👭 Только девушки") { Task { await joinCompany(girlsOnly: true) } }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text("Найдём 2–4 человек, которые тоже идут, и откроем общий чат.")
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { Task { await inviteToEvent() } } label: {
+                    Image(systemName: "square.and.arrow.up").accessibilityLabel("Позвать друга")
+                }
+            }
+        }
     }
 
     private func content(_ event: EventCard) -> some View {
@@ -58,6 +76,8 @@ struct EventView: View {
                 if let text = event.description, !text.isEmpty {
                     Text(text).font(.ui(15)).foregroundStyle(Color.ink)
                 }
+                friendsGoing(event)
+                companyCard(event)
 
                 Button {
                     if model.isGuest { model.showLogin = true } else { showPeople = true }
@@ -80,6 +100,10 @@ struct EventView: View {
                 }
                 .buttonStyle(.plain)
 
+                if !event.started {
+                    Button("👋 Позвать друга") { Task { await inviteToEvent() } }
+                        .buttonStyle(BigButtonStyle(fill: .sun, ink: .ink, height: 52))
+                }
                 if let link = event.url, let url = URL(string: link), !link.isEmpty {
                     Button("Билеты и подробности") { openURL(url) }
                         .buttonStyle(BigButtonStyle(fill: .white, ink: .ink, height: 52))
@@ -91,6 +115,92 @@ struct EventView: View {
             .padding(20)
         }
         .safeAreaInset(edge: .bottom) { footer(event) }
+    }
+
+    @ViewBuilder
+    private func friendsGoing(_ event: EventCard) -> some View {
+        let friends = event.friends?.people ?? []
+        if !friends.isEmpty {
+            HStack(spacing: 10) {
+                HStack(spacing: -10) {
+                    ForEach(friends.prefix(4)) { person in Avatar(person: person, size: 32) }
+                }
+                Text(friends.count == 1 ? "👋 \(friends[0].name) тоже идёт"
+                                        : "👋 Идут ваши друзья: " + friends.map(\.name).joined(separator: ", "))
+                    .font(.ui(14, .semibold))
+                    .foregroundStyle(Color.ink)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.sun, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+    }
+
+    /// «Соберите мне компанию»: groups of 3–5 people with a shared chat.
+    @ViewBuilder
+    private func companyCard(_ event: EventCard) -> some View {
+        if let group = event.group {
+            Button { openGroup = group.id } label: {
+                Card(fill: .sky) {
+                    HStack {
+                        Text("👥 Ваша компания").font(.ui(13, .heavy)).foregroundStyle(Color.ink)
+                        Spacer()
+                        Badge(text: "\(group.size) " + plural(group.size, "человек", "человека", "человек"), fill: .ink, ink: .white)
+                    }
+                    Text("Вы" + (group.others.isEmpty ? "" : ", " + group.others.map(\.name).joined(separator: ", ")))
+                        .font(.ui(15, .bold))
+                        .foregroundStyle(Color.ink)
+                    if let captain = group.captainId {
+                        Text(captain == model.me?.id ? "⭐ Вы капитан компании"
+                                                     : "⭐ Капитан: " + (group.others.first { $0.id == captain }?.name ?? ""))
+                            .font(.ui(14, .semibold))
+                            .foregroundStyle(Color.ink)
+                    }
+                    if !event.deal.isEmpty {
+                        Badge(text: "🎟 " + event.deal + " — промокод в чате", fill: .lime)
+                    }
+                    Text("Открыть чат компании")
+                        .font(.ui(15, .heavy))
+                        .foregroundStyle(Color.ink)
+                        .frame(maxWidth: .infinity, minHeight: 46)
+                        .background(Color.lime, in: Capsule())
+                }
+            }
+            .buttonStyle(.plain)
+        } else if !event.started {
+            Card {
+                if event.waiting == true {
+                    Text("👥 Собираем компанию").font(.ui(13, .heavy)).foregroundStyle(Color.muted)
+                    Text(((event.waitingCount ?? 0) > 0 ? "Кроме вас ждут ещё \(event.waitingCount ?? 0). " : "")
+                         + "Как только наберётся 3 человека, откроем общий чат и пришлём уведомление.")
+                        .font(.ui(15, .semibold))
+                        .foregroundStyle(Color.ink)
+                    Text("Ближе к началу хватит и двоих.").font(.ui(13)).foregroundStyle(Color.muted)
+                    Button("Не собирать") { Task { await stopCompany() } }
+                        .font(.ui(15, .bold))
+                        .foregroundStyle(Color.danger)
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                } else {
+                    Text("👥 Компания на вечер").font(.ui(13, .heavy)).foregroundStyle(Color.muted)
+                    Text("Не хочется вдвоём с незнакомцем?").font(.ui(18, .heavy)).foregroundStyle(Color.ink)
+                    Text("Соберём компанию из 3–5 человек, которые тоже идут, и откроем общий чат. С компанией проще и не похоже на свидание.")
+                        .font(.ui(14, .semibold))
+                        .foregroundStyle(Color.ink)
+                    if !event.deal.isEmpty {
+                        Badge(text: "🎟 Компании — " + event.deal, fill: .lime)
+                    }
+                    if let count = event.waitingCount, count > 0 {
+                        Text("Уже ждут: \(count)").font(.ui(13, .heavy)).foregroundStyle(Color.cobaltInk)
+                    }
+                    Button("Соберите мне компанию") {
+                        if model.isGuest { model.showLogin = true; return }
+                        if model.me?.isGirl == true { askCompany = true } else { Task { await joinCompany(girlsOnly: false) } }
+                    }
+                    .buttonStyle(BigButtonStyle(height: 50))
+                }
+            }
+            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color.ink, lineWidth: 2))
+        }
     }
 
     private func fact(_ title: String, _ value: String) -> some View {
@@ -127,6 +237,7 @@ struct EventView: View {
                 Button(mine == "looking" ? "✓ Ищу компанию" : "Ищу компанию") {
                     if model.isGuest { model.showLogin = true; return }
                     note = event.myNote ?? ""
+                    girlsOnly = event.myGirlsOnly ?? false
                     askNote = true
                 }
                 .buttonStyle(BigButtonStyle(fill: mine == "looking" ? .lime : .ink, ink: mine == "looking" ? .ink : .white))
@@ -146,6 +257,14 @@ struct EventView: View {
             Field(title: "Сообщение гостям") {
                 TextField("Иду первый раз, хочу компанию из 2–3 человек", text: $note, axis: .vertical)
                     .lineLimit(2...4)
+            }
+            if model.me?.isGirl == true {
+                Toggle(isOn: $girlsOnly) {
+                    Text("👭 Только с девушками — меня увидят и позовут только девушки")
+                        .font(.ui(14, .semibold))
+                        .foregroundStyle(Color.ink)
+                }
+                .tint(.cobalt)
             }
             Button(event?.myStatus == "looking" ? "Сохранить" : "Показать меня гостям") {
                 Task {
@@ -172,7 +291,7 @@ struct EventView: View {
         .padding(20)
         .padding(.top, 8)
         .background(Color.ground)
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
     }
 
     private func load() async {
@@ -189,7 +308,8 @@ struct EventView: View {
     private func attend(_ status: String, note: String) async -> Bool {
         do {
             let _: StatusResponse = try await API.call("POST", "/events/\(eventId)/attend",
-                                                       body: ["status": status, "note": String(note.prefix(200))])
+                                                       body: ["status": status, "note": String(note.prefix(200)),
+                                                              "girls_only": status == "looking" && girlsOnly])
             await load()
             if status != "none" { await Nudges.askPermissionIfNeeded() }
             await model.refreshNudges()
@@ -197,6 +317,53 @@ struct EventView: View {
         } catch {
             model.say(error.localizedDescription)
             return false
+        }
+    }
+}
+
+extension EventView {
+    fileprivate func joinCompany(girlsOnly: Bool) async {
+        do {
+            let answer: AttendAnswer = try await API.call("POST", "/events/\(eventId)/attend", body: [
+                "status": "looking", "note": event?.myNote ?? "", "group": true, "girls_only": girlsOnly,
+            ])
+            await load()
+            await model.refreshNudges()
+            if let group = answer.group {
+                model.say("Вы в компании")
+                openGroup = group.id
+            } else {
+                model.say("Собираем компанию — пришлём уведомление")
+            }
+        } catch {
+            model.say(error.localizedDescription)
+        }
+    }
+
+    fileprivate func stopCompany() async {
+        do {
+            let _: StatusResponse = try await API.call("POST", "/events/\(eventId)/attend", body: [
+                "status": "looking", "note": event?.myNote ?? "", "group": false,
+            ])
+            await load()
+        } catch {
+            model.say(error.localizedDescription)
+        }
+    }
+
+    /// «Позвать друга» on an event: a personal link that opens this event.
+    fileprivate func inviteToEvent() async {
+        guard let event else { return }
+        let text = "Пойдёшь со мной на «\(event.title)»? " + When.label(event.startsAt)
+        if model.isGuest {
+            Share.present(text: text, link: Config.baseURL.absoluteString + "/e/\(event.id)")
+            return
+        }
+        do {
+            let links: InviteLinks = try await API.call("GET", "/events/\(event.id)/invite")
+            Share.present(text: text, link: links.webLink)
+        } catch {
+            model.say(error.localizedDescription)
         }
     }
 }
@@ -211,6 +378,7 @@ struct PeopleView: View {
     @State private var event: EventCard?
     @State private var failure: String?
     @State private var reporting: Person?
+    @State private var girls = false
 
     var body: some View {
         ScrollView {
@@ -220,16 +388,33 @@ struct PeopleView: View {
                     Text("Ищут компанию").font(.display(eventId == nil ? 28 : 24)).foregroundStyle(Color.ink)
                 }
                 RuleNote()
+                if model.me?.isGirl == true {
+                    Chip(title: "👭 Только девушки", selected: girls, small: true) {
+                        girls.toggle()
+                        Task { await load() }
+                    }
+                }
                 if let people {
                     if people.isEmpty {
                         EmptyNote(title: "Пока никого",
-                                  text: "Отметьте «Ищу компанию» на странице события, и другие гости увидят вас здесь.")
+                                  text: "Отметьте «Ищу компанию» на странице события, и другие гости увидят вас здесь. Или позовите друга.")
                     }
                     ForEach(people, id: \.key) { seeker in
                         SeekerCard(seeker: seeker, showEvent: eventId == nil,
                                    invite: { Task { await invite(seeker) } },
                                    report: { reporting = seeker.person })
                     }
+                    Button { Task { await model.inviteFriend() } } label: {
+                        Card(fill: .sun) {
+                            Text(people.isEmpty ? "👋 Позвать друга" : "👋 Не нашли с кем пойти?")
+                                .font(.ui(17, .heavy))
+                                .foregroundStyle(Color.ink)
+                            Text("Позовите друга — ссылка откроет приложение")
+                                .font(.ui(14, .semibold))
+                                .foregroundStyle(Color.ink)
+                        }
+                    }
+                    .buttonStyle(.plain)
                 } else if let failure {
                     EmptyNote(title: "Не получилось загрузить", text: failure)
                 } else {
@@ -257,7 +442,7 @@ struct PeopleView: View {
 
     private func load() async {
         do {
-            let path = eventId.map { "/events/\($0)/people" } ?? "/people"
+            let path = (eventId.map { "/events/\($0)/people" } ?? "/people") + (girls ? "?girls=1" : "")
             let answer: PeopleResponse = try await API.call("GET", path)
             people = answer.people
             event = answer.event
@@ -305,6 +490,9 @@ struct SeekerCard: View {
                 Avatar(person: seeker.person, size: 56)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(seeker.person.title).font(.ui(18, .heavy)).foregroundStyle(Color.ink)
+                    if seeker.girlsOnly == true {
+                        Badge(text: "👭 только с девушками", fill: .pink2)
+                    }
                     let about = seeker.note.isEmpty ? seeker.bio : seeker.note
                     if !about.isEmpty {
                         Text(about).font(.ui(14)).foregroundStyle(Color.ink)
