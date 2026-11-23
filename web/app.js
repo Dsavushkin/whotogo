@@ -113,8 +113,20 @@ const screens = {};
 /** Small marks on an afisha card: friends who go and the group-ticket offer. */
 const extras = (e) => (e.friends || e.group_deal ? `<span class="marks">${e.friends ? `<span class="mark friends">👋 ${e.friends} ${plural(e.friends, 'друг', 'друга', 'друзей')}</span>` : ''}${e.group_deal ? `<span class="mark deal">🎟 ${esc(e.group_deal)}</span>` : ''}</span>` : '');
 
+const localDay = () => new Date().toDateString();
 screens.afisha = async () => {
-  const data = await api('GET', `/events?day=${state.day}${state.category ? '&category=' + state.category : ''}`);
+  // Late evening nothing is left today: open tomorrow and hide «Сегодня» until the date changes.
+  if (state.noToday && state.noToday !== localDay()) state.noToday = '';
+  if (state.noToday && state.day === 'today') state.day = 'tomorrow';
+  let data = await api('GET', `/events?day=${state.day}${state.category ? '&category=' + state.category : ''}`);
+  if (state.day === 'today' && !data.events.length) {
+    const all = state.category ? await api('GET', '/events?day=today') : data;
+    if (!all.events.length) {
+      state.noToday = localDay();
+      state.day = 'tomorrow';
+      data = await api('GET', `/events?day=tomorrow${state.category ? '&category=' + state.category : ''}`);
+    }
+  }
   const titles = { today: 'Куда сегодня?', tomorrow: 'Куда завтра?', weekend: 'Куда на выходных?', week: 'Куда на неделе?' };
   const dayChip = (id, label) => `<button class="chip" data-day="${id}" aria-pressed="${state.day === id}">${label}</button>`;
   const catChip = (id, label) => `<button class="chip small" data-category="${id}" aria-pressed="${state.category === id}">${label}</button>`;
@@ -148,7 +160,7 @@ screens.afisha = async () => {
       <div class="between"><div class="col" style="gap:2px"><span class="kicker">Москва</span><h1 class="display">${titles[state.day]}</h1></div>
         ${state.me ? '<button class="chip small invite-chip" data-invite-friends>👋 Позвать друга</button>' : '<button class="chip" data-go="auth" style="background:var(--ink);color:#fff">Войти</button>'}</div>
       ${state.me ? '' : '<p class="note">Афиша Москвы и компания на вечер. Отметьте «Ищу компанию» на событии и посмотрите, кто ещё идёт.</p>'}
-      <div class="chips">${dayChip('today', 'Сегодня')}${dayChip('tomorrow', 'Завтра')}${dayChip('weekend', 'Выходные')}${dayChip('week', 'Неделя')}</div>
+      <div class="chips">${state.noToday ? '' : dayChip('today', 'Сегодня')}${dayChip('tomorrow', 'Завтра')}${dayChip('weekend', 'Выходные')}${dayChip('week', 'Неделя')}</div>
       <div class="chips">${catChip('', 'Всё')}${Object.entries(data.categories).filter(([id]) => id !== 'other').map(([id, label]) => catChip(id, label)).join('')}</div>
     </header>
     <main class="body">${cards || empty('Пока пусто', 'На эти даты событий нет. Посмотрите другие дни.', '<button class="btn ink small" data-day="week">Вся неделя</button>')}</main>

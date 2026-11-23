@@ -70,12 +70,15 @@ async def picks_for(day: str) -> tuple[str, list]:
     start, end = day_bounds(day)
     async with Session() as session:
         picks = await pick_events(session, start, end, 5)
-    title = {"today": "Куда сходить сегодня", "weekend": "Куда сходить на выходных"}[day]
+    title = {"today": "Куда сходить сегодня", "tomorrow": "Сегодня уже всё началось. Куда сходить завтра",
+             "weekend": "Куда сходить на выходных"}[day]
     return title, picks
 
 
 async def send_picks(message: Message, day: str) -> None:
     title, picks = await picks_for(day)
+    if not picks and day == "today":  # late evening: nothing left today
+        title, picks = await picks_for("tomorrow")
     if not picks:
         return await reply(message, texts.NOTHING_FOUND, [("Открыть афишу", "")])
     await reply(message, texts.picks_text(title, picks) + "\n\nОткройте событие и отметьте «Ищу компанию».",
