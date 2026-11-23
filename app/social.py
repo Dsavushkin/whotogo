@@ -1,11 +1,14 @@
 """Friends (through the personal invite link), achievements and the story picture for an achievement."""
 import io
 import secrets
+from datetime import timedelta
 from functools import lru_cache
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi import Request
+from fastapi.responses import HTMLResponse, Response
+from html import escape as esc
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
@@ -37,10 +40,13 @@ async def invite_code(session: AsyncSession, me: User) -> str:
     return me.invite_code
 
 
-def invite_links(code: str, group_id: Optional[int] = None) -> dict:
-    tail = f"_g{group_id}" if group_id else ""
-    web = f"{settings.webapp_url}/?fr={code}" + (f"&g={group_id}" if group_id else "")
-    return {"link": f"https://t.me/{settings.bot_username}?startapp=fr_{code}{tail}", "web_link": web}
+def invite_links(code: str, group_id: Optional[int] = None, event_id: Optional[int] = None) -> dict:
+    """`link` opens the Mini App in Telegram; `web_link` is a landing page that works anywhere:
+    Telegram, the iPhone app or the site."""
+    tail = (f"_g{group_id}" if group_id else "") + (f"_e{event_id}" if event_id else "")
+    query = "&".join(q for q in (f"g={group_id}" if group_id else "", f"e={event_id}" if event_id else "") if q)
+    return {"link": f"https://t.me/{settings.bot_username}?startapp=fr_{code}{tail}",
+            "web_link": f"{settings.webapp_url}/i/{code}" + (f"?{query}" if query else "")}
 
 
 async def friend_ids(session: AsyncSession, user_id: int) -> set[int]:
@@ -101,6 +107,10 @@ async def accept(body: AcceptIn, me: User = Depends(current_user), session: Asyn
         await notifier.send(inviter.tg_id, texts.new_friend(me), "friends", button="Друзья")
         await progress.award(session, inviter)
         await progress.award(session, me)
+    if new and not me.source and me.created_at > utcnow() - timedelta(hours=1):
+        me = await session.merge(me)
+        me.source = "invite"  # came through a friend's link: counted in /stats
+        await session.commit()
     group_id = await join_friends_group(session, me, inviter, body.group) if body.group else None
     return {"friend": user_card(inviter), "group_id": group_id, "new": new}
 
@@ -129,6 +139,12 @@ async def join_friends_group(session: AsyncSession, me: User, inviter: User, gro
         await notifier.send(other.tg_id, texts.group_joined(me, event), f"group-{group.id}",
                             throttle_key=f"gj{group.id}", throttle_seconds=1800, button="Открыть чат")
     return group.id
+
+
+@router.get("/events/{event_id}/invite")
+async def event_invite(event_id: int, me: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
+    """«Позвать друга» on an event: the friend opens the event and becomes my friend."""
+    return invite_links(await invite_code(session, me), event_id=event_id)
 
 
 @router.get("/groups/{group_id}/invite")
@@ -231,3 +247,43 @@ async def achievement_picture(code: str, level: int):
         raise HTTPException(404)
     return Response(story_picture(code, level), media_type="image/jpeg",
                     headers={"Cache-Control": "public, max-age=86400"})
+
+
+# ---------- invite landing page ----------
+
+@pictures.get("/i/{code}", response_class=HTMLResponse)
+async def invite_page(code: str, request: Request, g: Optional[int] = None, e: Optional[int] = None,
+                      session: AsyncSession = Depends(get_session)):
+    """Where a friend's link leads outside Telegram: choose Telegram, the iPhone app or the site."""
+    from .seo import APP_STORE, page
+    inviter = (await session.execute(select(User).where(User.invite_code == code[:16]))).scalar_one_or_none()
+    name = (inviter.name or "Друг") if inviter and not inviter.is_banned else "Друг"
+    event = await session.get(Event, e) if e else None
+    links = invite_links(code[:16], g, event.id if event else None)
+    web = f"/?fr={code[:16]}" + (f"&g={g}" if g else "") + (f"&go=event-{event.id}" if event else "")
+    await bump(session, "clicks:invite_page")
+    what = (f"на «{esc(event.title)}» — {esc(texts.when(event.starts_at))}" if event
+            else "в «Кто идёт» — находить компанию на концерты, квизы, выставки и вечеринки в Москве")
+    body = f"""<section class="invite">
+<p class="kicker">Приглашение</p>
+<h1>{esc(name)} зовёт тебя {what}</h1>
+<p>Смотри, кто ещё идёт на события, собирай компанию из 3–5 человек и не ходи один.</p>
+<div class="buttons">
+<a class="btn" href="{esc(links['link'])}">Открыть в Telegram</a>
+<a class="btn light" href="{APP_STORE}?ct=invite">Приложение для iPhone</a>
+<a class="btn light" href="{esc(web)}">Открыть на сайте</a>
+</div>
+<p class="small">После входа {esc(name)} появится у тебя в друзьях: будете видеть, кто куда идёт.</p>
+</section>"""
+    return page(f"{name} зовёт тебя в «Кто идёт»", "Компания на концерты, квизы и выставки в Москве",
+                f"/i/{code[:16]}", body, image=f"{settings.webapp_url}/promo/ads/dark_1x1.jpg", noindex=True)
+
+
+async def bump(session: AsyncSession, key: str) -> None:
+    from .models import Setting
+    row = await session.get(Setting, key)
+    if row is None:
+        session.add(Setting(key=key, value="1"))
+    else:
+        row.value = str(int(row.value or 0) + 1)
+    await session.commit()

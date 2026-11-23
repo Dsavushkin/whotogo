@@ -673,3 +673,17 @@ async def test_group_deal(client):
     group = (await a.ok("GET", f"/events/{event}"))["group"]["id"]
     chat = await a.ok("GET", f"/groups/{group}")
     assert chat["promo"] == "KTO20" and chat["deal"] == "−20% для компании"
+
+
+async def test_invite_link_page(client):
+    a, b = await crowd(client, ["Аня", "Боря"])
+    event = await add_event(hours=10, title="Квиз в Депо")
+    links = await a.ok("GET", f"/events/{event}/invite")
+    code = links["link"].split("fr_")[1].split("_")[0]
+    assert links["link"].endswith(f"_e{event}") and links["web_link"].endswith(f"/i/{code}?e={event}")
+    landing = await client.get(f"/i/{code}", params={"e": event})
+    assert landing.status_code == 200 and "Аня зовёт тебя" in landing.text and "Квиз в Депо" in landing.text
+    assert f"startapp=fr_{code}_e{event}" in landing.text and "apps.apple.com" in landing.text
+    general = (await a.ok("GET", "/friends"))["web_link"]
+    assert general.endswith(f"/i/{code}")
+    assert (await b.ok("POST", "/friends/accept", json={"code": code}))["new"] is True

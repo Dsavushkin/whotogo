@@ -171,7 +171,7 @@ async def stats(message: Message):
         clicks = (await session.execute(select(Setting).where(Setting.key.like("clicks:%")))).scalars().all()
     by_source = "\n".join(f"  {src or 'без метки'}: {n}" for src, n in sources) or "  —"
     if clicks:
-        by_source += "\n\nПереходы в App Store по ссылке /app:\n" + "\n".join(
+        by_source += "\n\nПереходы по ссылкам (метки /app — в App Store, invite_page — открытия приглашений):\n" + "\n".join(
             f"  {c.key[7:]}: {c.value}" for c in clicks)
     await message.answer(f"Пользователей: {users} (с профилем: {ready})\nБудущих событий: {events}\n"
                          f"Отметок «иду»: {marks}, из них ищут компанию: {looking}\nВзаимных пар: {pairs}\n\n"

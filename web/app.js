@@ -146,7 +146,7 @@ screens.afisha = async () => {
   return `<div class="screen with-nav">
     <header class="head">
       <div class="between"><div class="col" style="gap:2px"><span class="kicker">Москва</span><h1 class="display">${titles[state.day]}</h1></div>
-        ${state.me ? '' : '<button class="chip" data-go="auth" style="background:var(--ink);color:#fff">Войти</button>'}</div>
+        ${state.me ? '<button class="chip small invite-chip" data-invite-friends>👋 Позвать друга</button>' : '<button class="chip" data-go="auth" style="background:var(--ink);color:#fff">Войти</button>'}</div>
       ${state.me ? '' : '<p class="note">Афиша Москвы и компания на вечер. Отметьте «Ищу компанию» на событии и посмотрите, кто ещё идёт.</p>'}
       <div class="chips">${dayChip('today', 'Сегодня')}${dayChip('tomorrow', 'Завтра')}${dayChip('weekend', 'Выходные')}${dayChip('week', 'Неделя')}</div>
       <div class="chips">${catChip('', 'Всё')}${Object.entries(data.categories).filter(([id]) => id !== 'other').map(([id, label]) => catChip(id, label)).join('')}</div>
@@ -252,7 +252,8 @@ screens.people = async () => {
     `<button class="line small semi muted" data-go="event/${p.event.id}" style="text-align:left"><span class="badge ink">${when(p.event.starts_at)}</span><span class="clip">${esc(p.event.title)}</span></button>`)).join('');
   return `<div class="screen with-nav">
     <header class="head"><div class="col" style="gap:2px"><span class="kicker">На этой неделе</span><h1 class="display">Ищут компанию</h1></div>${RULE}${girlsChip()}</header>
-    <main class="body">${cards || empty('Пока никого', 'Выберите событие в афише и отметьте «Ищу компанию» — так вас найдут.', '<button class="btn ink small" data-go="">Открыть афишу</button>')}</main>
+    <main class="body">${cards || empty('Пока никого', 'Выберите событие в афише и отметьте «Ищу компанию» — так вас найдут. Или позовите друга.', '<button class="btn ink small" data-go="">Открыть афишу</button><button class="btn soft small" data-invite-friends>👋 Позвать друга</button>')}
+      ${cards ? '<button class="card invite-card" data-invite-friends><span class="strong">👋 Не нашли с кем пойти?</span><span class="small semi">Позовите друга — ссылка откроет приложение</span></button>' : ''}</main>
     ${nav('people')}</div>`;
 };
 
@@ -471,6 +472,7 @@ screens.profile = async () => {
       <section class="card"><div class="line" style="gap:14px">${ava(me, 'l')}<div class="col" style="gap:2px"><h2 class="strong" style="font-size:20px">${who(me)}</h2>${me.bio ? `<p class="small">${esc(me.bio)}</p>` : ''}</div></div>
         ${me.interests.length ? `<div class="tags">${me.interests.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
         <button class="btn soft small" data-go="profile/edit">Изменить</button></section>
+      <button class="card invite-card" data-invite-friends><span class="strong" style="font-size:18px">👋 Позвать друга</span><span class="small semi">Отправьте ссылку на «Кто идёт» — ходить вместе веселее. Друг появится у вас в друзьях, а вы получите достижение.</span></button>
       <section class="card"><span class="between"><h2 class="strong" style="font-size:17px">Достижения · ${got.length} из ${p.achievements.length}</h2><button class="btn text small" data-go="achievements" style="width:auto;padding:0">Все</button></span>
         <div class="ach-grid">${top.map(achTile).join('')}</div></section>
       <button class="card" data-go="friends" style="gap:4px"><span class="strong" style="font-size:17px">👋 Друзья →</span><span class="small semi muted">Позвать друзей и посмотреть, кто куда идёт</span></button>
@@ -613,9 +615,23 @@ async function joinCompany(e, girlsOnly) {
   render();
 }
 
+/** «Позвать друга»: a personal link to the app. The friend lands in Telegram, the iPhone app or the site
+ * and becomes a friend after signing in. */
+async function inviteFriend() {
+  if (!state.me) { state.returnTo = route().join('/'); return go('auth'); }
+  const f = state.invite || (state.invite = await act(() => api('GET', '/friends')));
+  if (!f) return;
+  haptic();
+  return shareLink(f.link, f.web_link, 'Я нахожу компанию на концерты, квизы и выставки в «Кто идёт». Присоединяйся — пойдём вместе');
+}
+
 async function shareEvent(e) {
   if (!e) return;
   const text = `Пойдёшь со мной на «${e.title}»? ${when(e.starts_at, true)}`;
+  if (state.me) {
+    const inv = await act(() => api('GET', `/events/${e.id}/invite`));
+    if (inv) return shareLink(inv.link, inv.web_link, text);
+  }
   if (inTelegram && tg.openTelegramLink) {
     const link = `https://t.me/${state.bot}?startapp=event-${e.id}`;
     return tg.openTelegramLink('https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent(text));
@@ -684,11 +700,7 @@ document.addEventListener('click', async (event) => {
     try { await navigator.clipboard.writeText(d.copy); toast('Скопировано'); } catch (err) { toast(d.copy); }
     return;
   }
-  if ('inviteFriends' in d) {
-    const f = state.invite;
-    if (f) shareLink(f.link, f.web_link, 'Я нахожу компанию на концерты, квизы и выставки в «Кто идёт». Добавляйся — будем видеть, кто куда идёт');
-    return;
-  }
+  if ('inviteFriends' in d) return inviteFriend();
   if (d.unfriend) {
     if (await act(() => api('DELETE', '/friends/' + d.unfriend))) render();
     return;
@@ -860,12 +872,14 @@ function deepLink() {
   const target = params.get('go') || (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || '';
   const m = /^(chat|after|event|match|people|group)-(\d+)$/.exec(target);
   if (m) return m[1] === 'people' ? `event/${m[2]}/people` : `${m[1]}/${m[2]}`;
+  const invited = /^fr_[a-z0-9]{4,16}(?:_g\d+)?_e(\d+)$/i.exec(target);
+  if (invited) return `event/${invited[1]}`;
   return ['org', 'achievements', 'friends'].includes(target) ? target : '';
 }
 /** A friend's invite (t.me/<bot>?startapp=fr_<code>[_g<company>] or ?fr=<code>&g=<company>): kept until signed in. */
 function keepInvite() {
   const sp = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || '';
-  const m = /^fr_([a-z0-9]{4,16})(?:_g(\d+))?$/i.exec(sp);
+  const m = /^fr_([a-z0-9]{4,16})(?:_g(\d+))?(?:_e(\d+))?$/i.exec(sp);
   const code = m ? m[1] : params.get('fr'), group = m ? m[2] : params.get('g');
   if (code) { try { localStorage.setItem('invite', JSON.stringify({ code, group: group ? Number(group) : null })); } catch (e) { /* private mode */ } }
 }
