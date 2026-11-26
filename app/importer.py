@@ -7,7 +7,7 @@ from .config import settings
 from .db import Session
 from .models import Event
 from .notify import status
-from .sources import timepad
+from .sources import mozgva, quizplease, timepad
 
 log = logging.getLogger("whotogo.import")
 FIELDS = ("title", "description", "category", "starts_at", "ends_at", "place", "address", "price", "url", "image")
@@ -41,15 +41,30 @@ async def save_events(items: list, city: str) -> dict:
 
 
 async def run_import() -> dict:
-    if not settings.timepad_token:
-        return {"error": "Не задан TIMEPAD_TOKEN"}
-    try:
-        items = await timepad.fetch(settings.timepad_token, settings.timepad_city, settings.import_days_ahead)
-    except Exception as error:
-        log.warning("timepad import failed: %s", error)
-        status["import"] = {"error": f"{type(error).__name__}: {error}"[:200]}
-        return {"error": f"Timepad: {error}"}
-    result = await save_events(items, settings.city)
-    log.info("import done: %s", result)
-    status["import"] = result
-    return result
+    """Timepad (if a token is set) plus the quiz organizers. One failing source does not stop the others."""
+    jobs = [("Квиз, плиз", quizplease.fetch()), ("Мозгва", mozgva.fetch())]
+    if settings.timepad_token:
+        jobs.insert(0, ("Timepad", timepad.fetch(settings.timepad_token, settings.timepad_city,
+                                                  settings.import_days_ahead)))
+    total = {"added": 0, "updated": 0, "seen": 0}
+    errors = []
+    for name, job in jobs:
+        try:
+            items = await job
+        except Exception as error:
+            log.warning("%s import failed: %s", name, error)
+            errors.append(f"{name}: {type(error).__name__}: {error}"[:200])
+            continue
+        if not items:
+            continue
+        result = await save_events(items, settings.city)
+        log.info("import %s: %s", name, result)
+        for key in total:
+            total[key] += result[key]
+    if errors and not total["seen"]:
+        status["import"] = {"error": "; ".join(errors)[:300]}
+        return {"error": "; ".join(errors)}
+    if errors:
+        total["warnings"] = errors
+    status["import"] = total
+    return total
