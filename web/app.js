@@ -161,30 +161,41 @@ screens.afisha = async () => {
         ${state.me ? '<button class="chip small invite-chip" data-invite-friends>👋 Позвать друга</button>' : '<button class="chip" data-go="auth" style="background:var(--ink);color:#fff">Войти</button>'}</div>
       ${state.me ? '' : '<p class="note">Афиша Москвы и компания на вечер. Отметьте «Ищу компанию» на событии и посмотрите, кто ещё идёт.</p>'}
       <div class="chips">${state.noToday ? '' : dayChip('today', 'Сегодня')}${dayChip('tomorrow', 'Завтра')}${dayChip('weekend', 'Выходные')}${dayChip('week', 'Неделя')}</div>
-      <div class="chips">${catChip('', 'Всё')}${Object.entries(data.categories).filter(([id]) => id !== 'other').map(([id, label]) => catChip(id, label)).join('')}</div>
+      <div class="chips">${catChip('', 'Всё')}${Object.entries(data.categories).filter(([id]) => id !== 'other').map(([id, label]) => catChip(id, id === 'quiz' ? '🧠 ' + label : label)).join('')}</div>
     </header>
     <main class="body">${cards || empty('Пока пусто', 'На эти даты событий нет. Посмотрите другие дни.', '<button class="btn ink small" data-day="week">Вся неделя</button>')}</main>
     ${nav('')}</div>`;
 };
 
 function companyCard(e) {
+  const quiz = e.category === 'quiz';
+  const what = quiz ? 'команду' : 'компанию';
   const faces = (list) => `<span class="faces">${list.slice(0, 4).map((p) => ava(p, 's')).join('')}</span>`;
   if (e.group) {
     const names = e.group.others.map((p) => esc(p.name)).join(', ');
     return `<button class="card company ready" data-go="group/${e.group.id}">
-      <span class="between"><span class="kicker">👥 Ваша компания</span><span class="badge ink">${e.group.size} ${plural(e.group.size, 'человек', 'человека', 'человек')}</span></span>
+      <span class="between"><span class="kicker">👥 Ваша ${quiz ? 'команда' : 'компания'}</span><span class="badge ink">${e.group.size} ${plural(e.group.size, 'человек', 'человека', 'человек')}</span></span>
       <span class="line">${faces(e.group.others)}<span class="small semi clip">Вы${names ? ', ' + names : ''}</span></span>
-      ${e.group.captain_id ? `<span class="small semi">⭐ ${e.group.captain_id === state.me.id ? 'Вы капитан компании' : 'Капитан: ' + esc((e.group.others.find((p) => p.id === e.group.captain_id) || {}).name || '')}</span>` : ''}
+      ${e.group.captain_id ? `<span class="small semi">⭐ ${e.group.captain_id === state.me.id ? (quiz ? 'Вы капитан команды' : 'Вы капитан компании') : 'Капитан: ' + esc((e.group.others.find((p) => p.id === e.group.captain_id) || {}).name || '')}</span>` : ''}
       ${e.group_deal ? `<span class="mark deal">🎟 ${esc(e.group_deal)} — промокод в чате</span>` : ''}
-      <span class="btn lime small">Открыть чат компании</span></button>`;
+      <span class="btn lime small">Открыть чат ${quiz ? 'команды' : 'компании'}</span></button>`;
   }
   if (e.started) return '';
   if (e.waiting) {
     return `<div class="card company">
-      <span class="kicker">👥 Собираем компанию</span>
+      <span class="kicker">👥 Собираем ${what}</span>
       <span class="semi">${e.waiting_count ? `Кроме вас ждут ещё ${e.waiting_count}. ` : ''}Как только наберётся 3 человека, откроем общий чат и пришлём уведомление.</span>
       <span class="tiny semi muted">Ближе к началу хватит и двоих.</span>
       <button class="btn text small danger" data-company-stop="${e.id}">Не собирать</button></div>`;
+  }
+  if (quiz) {
+    return `<div class="card company quiz">
+    <span class="kicker">🧠 Команда на квиз</span>
+    <span class="strong" style="font-size:18px">Не с кем играть?</span>
+    <span class="small semi">Соберём команду из 3–5 человек, которые тоже идут на эту игру, и откроем общий чат: придумаете название и договоритесь о встрече.</span>
+    ${e.group_deal ? `<span class="mark deal">🎟 Командам — ${esc(e.group_deal)}</span>` : ''}
+    ${e.waiting_count ? `<span class="looking">Уже ждут: ${e.waiting_count}</span>` : ''}
+    <button class="btn ink small" data-company="${e.id}">Соберите мне команду</button></div>`;
   }
   return `<div class="card company">
     <span class="kicker">👥 Компания на вечер</span>
@@ -678,9 +689,10 @@ document.addEventListener('click', async (event) => {
     if (!state.me) { state.returnTo = route().join('/'); return go('auth'); }
     const e = state.event;
     if (isGirl()) {
-      return sheet(`<h2 class="strong">Соберём компанию</h2><p class="muted">Найдём 2–4 человек, которые тоже идут, и откроем общий чат.</p>
+      const what = e.category === 'quiz' ? 'команду' : 'компанию';
+      return sheet(`<h2 class="strong">Соберём ${what}</h2><p class="muted">Найдём 2–4 человек, которые тоже идут, и откроем общий чат.</p>
         <label class="check"><input type="checkbox" id="company-girls" ${e.my_girls_only ? 'checked' : ''}><span>👭 Только девушки</span></label>
-        <button class="btn ink" data-company-go="${e.id}">Соберите мне компанию</button><button class="btn text" data-close>Отмена</button>`);
+        <button class="btn ink" data-company-go="${e.id}">Соберите мне ${what}</button><button class="btn text" data-close>Отмена</button>`);
     }
     return joinCompany(e, false);
   }
@@ -882,6 +894,8 @@ document.addEventListener('submit', async (event) => {
 // ---------- start ----------
 function deepLink() {
   const target = params.get('go') || (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || '';
+  // «Квизы» link for organizers and ads: t.me/<bot>?startapp=quiz or ?go=quiz — afisha of quizzes for the week.
+  if (target === 'quiz') { state.category = 'quiz'; state.day = 'week'; return ''; }
   const m = /^(chat|after|event|match|people|group)-(\d+)$/.exec(target);
   if (m) return m[1] === 'people' ? `event/${m[2]}/people` : `${m[1]}/${m[2]}`;
   const invited = /^fr_[a-z0-9]{4,16}(?:_g\d+)?_e(\d+)$/i.exec(target);

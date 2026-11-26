@@ -49,6 +49,9 @@ async def init_db() -> None:
                 "ALTER TABLE events ADD COLUMN IF NOT EXISTS group_deal VARCHAR(120) NOT NULL DEFAULT ''",
                 "ALTER TABLE events ADD COLUMN IF NOT EXISTS group_promo VARCHAR(40) NOT NULL DEFAULT ''",
                 "ALTER TABLE groups ADD COLUMN IF NOT EXISTS captain_id INTEGER REFERENCES users(id)",
+                # Quizzes became their own category («Квизы»): move the ones already in the afisha.
+                "UPDATE events SET category = 'quiz' WHERE category IN ('games', 'other') AND (title ILIKE '%квиз%'"
+                " OR title ILIKE '%quiz%' OR title ILIKE '%викторин%' OR title ILIKE '%своя игра%')",
             ):
                 await conn.exec_driver_sql(statement)
 

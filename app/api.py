@@ -23,13 +23,18 @@ router = APIRouter(prefix="/api")
 TZ = ZoneInfo(settings.timezone)
 
 CATEGORIES = {
-    "music": "Музыка", "party": "Вечеринки", "food": "Еда", "games": "Игры", "art": "Искусство",
+    "quiz": "Квизы", "music": "Музыка", "party": "Вечеринки", "food": "Еда", "games": "Игры", "art": "Искусство",
     "theater": "Театр", "cinema": "Кино", "talk": "Лекции", "sport": "Спорт", "walk": "Прогулки", "dating": "Знакомства",
     "other": "Другое",
 }
 
 
 # ---------- helpers ----------
+
+def category_keys(category: str) -> tuple:
+    """«Игры» in iPhone 1.1 and older links also shows quizzes, which became their own category."""
+    return ("games", "quiz") if category == "games" else (category,)
+
 
 def to_local_iso(dt: Optional[datetime]) -> Optional[str]:
     if dt is None:
@@ -311,7 +316,7 @@ async def list_events(day: str = "today", category: str = "", me: Optional[User]
     query = select(Event).where(Event.published, Event.city == city, Event.starts_at >= start,
                                 Event.starts_at < end)
     if category:
-        query = query.where(Event.category == category)
+        query = query.where(Event.category.in_(category_keys(category)))
     events = list((await session.execute(query.order_by(Event.starts_at).limit(200))).scalars())
     counts = await counts_for(session, [e.id for e in events])
     friends = await friends_at(session, me, [e.id for e in events])

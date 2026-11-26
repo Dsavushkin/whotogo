@@ -523,9 +523,9 @@ struct AfishaView: View {
     }
 
     private var categories: [(String, String)] {
-        let order = ["music", "party", "food", "games", "art", "theater", "cinema", "talk", "sport", "walk", "dating"]
+        let order = ["quiz", "music", "party", "food", "games", "art", "theater", "cinema", "talk", "sport", "walk", "dating"]
         let names = data?.categories ?? [:]
-        return order.compactMap { id in names[id].map { (id, $0) } }
+        return order.compactMap { id in names[id].map { (id, id == "quiz" ? "🧠 " + $0 : $0) } }
     }
 
     private func load() async {

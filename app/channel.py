@@ -23,7 +23,7 @@ log = logging.getLogger("whotogo.channel")
 # weekday (None = every day): (hour, kind)
 SCHEDULE = [(None, 11, "today"), (3, 19, "weekend")]
 TITLES = {"today": "Куда сходить сегодня", "weekend": "Куда сходить на выходных"}
-EMOJI = {"music": "🎷", "party": "🪩", "food": "🍷", "games": "🎲", "art": "🎨", "theater": "🎭", "cinema": "🎬",
+EMOJI = {"quiz": "🧠", "music": "🎷", "party": "🪩", "food": "🍷", "games": "🎲", "art": "🎨", "theater": "🎭", "cinema": "🎬",
          "talk": "🎤", "sport": "🏃", "walk": "🚶", "dating": "💞", "other": "✨"}
 
 

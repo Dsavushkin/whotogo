@@ -139,11 +139,12 @@ struct EventView: View {
     /// «Соберите мне компанию»: groups of 3–5 people with a shared chat.
     @ViewBuilder
     private func companyCard(_ event: EventCard) -> some View {
+        let quiz = event.category == "quiz"
         if let group = event.group {
             Button { openGroup = group.id } label: {
                 Card(fill: .sky) {
                     HStack {
-                        Text("👥 Ваша компания").font(.ui(13, .heavy)).foregroundStyle(Color.ink)
+                        Text(quiz ? "👥 Ваша команда" : "👥 Ваша компания").font(.ui(13, .heavy)).foregroundStyle(Color.ink)
                         Spacer()
                         Badge(text: "\(group.size) " + plural(group.size, "человек", "человека", "человек"), fill: .ink, ink: .white)
                     }
@@ -151,7 +152,7 @@ struct EventView: View {
                         .font(.ui(15, .bold))
                         .foregroundStyle(Color.ink)
                     if let captain = group.captainId {
-                        Text(captain == model.me?.id ? "⭐ Вы капитан компании"
+                        Text(captain == model.me?.id ? (quiz ? "⭐ Вы капитан команды" : "⭐ Вы капитан компании")
                                                      : "⭐ Капитан: " + (group.others.first { $0.id == captain }?.name ?? ""))
                             .font(.ui(14, .semibold))
                             .foregroundStyle(Color.ink)
@@ -159,7 +160,7 @@ struct EventView: View {
                     if !event.deal.isEmpty {
                         Badge(text: "🎟 " + event.deal + " — промокод в чате", fill: .lime)
                     }
-                    Text("Открыть чат компании")
+                    Text(quiz ? "Открыть чат команды" : "Открыть чат компании")
                         .font(.ui(15, .heavy))
                         .foregroundStyle(Color.ink)
                         .frame(maxWidth: .infinity, minHeight: 46)
@@ -170,7 +171,7 @@ struct EventView: View {
         } else if !event.started {
             Card {
                 if event.waiting == true {
-                    Text("👥 Собираем компанию").font(.ui(13, .heavy)).foregroundStyle(Color.muted)
+                    Text(quiz ? "👥 Собираем команду" : "👥 Собираем компанию").font(.ui(13, .heavy)).foregroundStyle(Color.muted)
                     Text(((event.waitingCount ?? 0) > 0 ? "Кроме вас ждут ещё \(event.waitingCount ?? 0). " : "")
                          + "Как только наберётся 3 человека, откроем общий чат и пришлём уведомление.")
                         .font(.ui(15, .semibold))
@@ -181,18 +182,19 @@ struct EventView: View {
                         .foregroundStyle(Color.danger)
                         .frame(maxWidth: .infinity, minHeight: 40)
                 } else {
-                    Text("👥 Компания на вечер").font(.ui(13, .heavy)).foregroundStyle(Color.muted)
-                    Text("Не хочется вдвоём с незнакомцем?").font(.ui(18, .heavy)).foregroundStyle(Color.ink)
-                    Text("Соберём компанию из 3–5 человек, которые тоже идут, и откроем общий чат. С компанией проще и не похоже на свидание.")
+                    Text(quiz ? "🧠 Команда на квиз" : "👥 Компания на вечер").font(.ui(13, .heavy)).foregroundStyle(Color.muted)
+                    Text(quiz ? "Не с кем играть?" : "Не хочется вдвоём с незнакомцем?").font(.ui(18, .heavy)).foregroundStyle(Color.ink)
+                    Text(quiz ? "Соберём команду из 3–5 человек, которые тоже идут на эту игру, и откроем общий чат: придумаете название и договоритесь о встрече."
+                              : "Соберём компанию из 3–5 человек, которые тоже идут, и откроем общий чат. С компанией проще и не похоже на свидание.")
                         .font(.ui(14, .semibold))
                         .foregroundStyle(Color.ink)
                     if !event.deal.isEmpty {
-                        Badge(text: "🎟 Компании — " + event.deal, fill: .lime)
+                        Badge(text: (quiz ? "🎟 Командам — " : "🎟 Компании — ") + event.deal, fill: .lime)
                     }
                     if let count = event.waitingCount, count > 0 {
                         Text("Уже ждут: \(count)").font(.ui(13, .heavy)).foregroundStyle(Color.cobaltInk)
                     }
-                    Button("Соберите мне компанию") {
+                    Button(quiz ? "Соберите мне команду" : "Соберите мне компанию") {
                         if model.isGuest { model.showLogin = true; return }
                         if model.me?.isGirl == true { askCompany = true } else { Task { await joinCompany(girlsOnly: false) } }
                     }
