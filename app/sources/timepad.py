@@ -11,9 +11,10 @@ API = "https://api.timepad.ru/v1/events"
 NAME = "timepad"
 
 # Our category <- words met in Timepad category names or event titles.
+# A quiz is told by the event title only: Timepad's category names like «Игры, квесты и квизы» also cover
+# mafia and board games.
+QUIZ_WORDS = ("квиз", "quiz", "мозгобойн", "что? где? когда", "своя игра", "викторин")
 CATEGORY_WORDS = [
-    ("quiz", ("квиз", "quiz", "интеллектуальн", "мозгобойн", "что? где? когда", "своя игра", "паб-викторин",
-              "викторин")),
     ("dating", ("знакомств", "свидани", "speed dating", "быстрые свидания")),
     ("games", ("игр", "квест", "мафи", "настол")),
     ("party", ("вечеринк", "party", "тусовк", "дискотек", "рейв")),
@@ -37,6 +38,8 @@ def clean(text: Optional[str]) -> str:
 
 
 def pick_category(names: list, title: str) -> str:
+    if any(w in title.lower() for w in QUIZ_WORDS):
+        return "quiz"
     hay = " ".join(names + [title]).lower()
     for slug, words in CATEGORY_WORDS:
         if any(w in hay for w in words):

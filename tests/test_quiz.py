@@ -64,3 +64,8 @@ def test_quizplease_game():
     assert quizplease.to_event({**item, "game_type": 1}) is None       # online stream
     themed = quizplease.to_event({**item, "title": "[music party] 100 хитов"})
     assert themed["title"].startswith("Квиз, плиз! [music party]")
+
+
+def test_timepad_quiz_category_name_is_not_enough():
+    assert pick_category(["Игры, квесты и квизы"], "Спортивная мафия в клубе") == "games"
+    assert pick_category(["Игры, квесты и квизы"], "Вечер настолок") == "games"
