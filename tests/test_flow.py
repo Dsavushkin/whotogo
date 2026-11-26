@@ -692,3 +692,14 @@ async def test_invite_link_page(client):
     general = (await a.ok("GET", "/friends"))["web_link"]
     assert general.endswith(f"/i/{code}")
     assert (await b.ok("POST", "/friends/accept", json={"code": code}))["new"] is True
+
+
+async def test_onetap_pages(client):
+    assert (await client.get("/onetap/")).status_code == 200
+    assert (await client.get("/onetap/privacy.html")).status_code == 200
+    demo = (await client.get("/onetap/demo.json")).json()
+    assert len(demo) == 2 and demo[0]["remarks"].startswith("Demo")
+    assert "easy2vpn" not in (await client.get("/onetap/")).text
+    notifier.sent.clear()
+    assert (await client.post("/api/onetap/support", json={"contact": "a@b.cd", "text": "Не подключается"})).status_code == 200
+    assert (await client.post("/api/onetap/support", json={"contact": "a@b.cd", "text": "ещё"})).status_code == 429
