@@ -7,7 +7,7 @@ from .config import settings
 from .db import Session
 from .models import Event
 from .notify import status
-from .seo import SECTION_OF, VENUE_SECTIONS, event_path, slugify
+from .seo import SECTION_OF, VENUE_SECTIONS, event_path, slugify, venue_ok
 from . import indexnow
 from .sources import findmafia, mozgva, pokersystem, quizplease, timepad
 
@@ -20,7 +20,7 @@ def venue_pages(events: list) -> list:
     out = []
     for event in events:
         section = SECTION_OF.get(event.category)
-        if section in VENUE_SECTIONS and event.place:
+        if section in VENUE_SECTIONS and venue_ok(event.place):
             out.append(f"/afisha/{section}/{slugify(event.place)}")
     return list(dict.fromkeys(out))
 

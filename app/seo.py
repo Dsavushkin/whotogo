@@ -250,10 +250,15 @@ def guide_html(slug: str) -> tuple[str, Optional[dict]]:
             f'<h2>Частые вопросы</h2>{faq}</section>'), schema
 
 
+def venue_ok(name: str) -> bool:
+    """A club or bar name, not an address that Timepad organizers sometimes put into the place field."""
+    return bool(name) and not re.search(r",|\bд\.\s*\d|\bул\.|улиц|переул|просп|бульвар|шоссе|\bм\.", name, re.I)
+
+
 def venues_html(section: str, events: list) -> str:
     names = {}
     for event in events:
-        if event.place and slugify(event.place) not in names:
+        if venue_ok(event.place) and slugify(event.place) not in names:
             names[slugify(event.place)] = event.place
     if len(names) < 2:
         return ""
@@ -337,7 +342,7 @@ async def afisha_venue(slug: str, place: str, session: AsyncSession = Depends(ge
     start, _ = day_bounds("week")
     rows = await session.execute(select(Event.place).where(
         Event.published, Event.category == key, Event.starts_at >= start, Event.place.is_not(None)).distinct())
-    name = next((x for x in rows.scalars() if x and slugify(x) == place), None)
+    name = next((x for x in rows.scalars() if venue_ok(x) and slugify(x) == place), None)
     if not name:
         raise HTTPException(404)
     what = {"poker": "турниров по покеру", "kvizy": "квизов", "mafiya": "игр в мафию"}[slug]
@@ -394,7 +399,7 @@ async def sitemap(session: AsyncSession = Depends(get_session)):
     places = await session.execute(select(Event.category, Event.place).where(
         Event.published, Event.category.in_(list(venue_keys)), Event.starts_at >= utcnow(),
         Event.place.is_not(None)).distinct())
-    venues = {f"{base}/afisha/{venue_keys[cat]}/{slugify(name)}" for cat, name in places if name}
+    venues = {f"{base}/afisha/{venue_keys[cat]}/{slugify(name)}" for cat, name in places if venue_ok(name)}
     urls += [(loc, today, "daily") for loc in sorted(venues)]
     rows = await session.execute(
         select(Event).where(Event.published, Event.starts_at >= utcnow() - timedelta(hours=3))
