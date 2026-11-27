@@ -252,7 +252,9 @@ def guide_html(slug: str) -> tuple[str, Optional[dict]]:
 
 def venue_ok(name: str) -> bool:
     """A club or bar name, not an address that Timepad organizers sometimes put into the place field."""
-    return bool(name) and not re.search(r",|\bд\.\s*\d|\bул\.|улиц|переул|просп|бульвар|шоссе|\bм\.", name, re.I)
+    if not name or name.strip().lower() in ("москва", "moscow", "онлайн"):
+        return False
+    return not re.search(r",|\bд\.\s*\d|\bул\.|улиц|переул|просп|бульвар|шоссе|\bм\.", name, re.I)
 
 
 def venues_html(section: str, events: list) -> str:
