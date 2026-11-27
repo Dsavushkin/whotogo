@@ -9,7 +9,7 @@ from .models import Event
 from .notify import status
 from .seo import SECTION_OF, VENUE_SECTIONS, event_path, slugify
 from . import indexnow
-from .sources import mozgva, pokersystem, quizplease, timepad
+from .sources import findmafia, mozgva, pokersystem, quizplease, timepad
 
 log = logging.getLogger("whotogo.import")
 FIELDS = ("title", "description", "category", "starts_at", "ends_at", "place", "address", "price", "url", "image")
@@ -58,7 +58,8 @@ async def save_events(items: list, city: str) -> dict:
 
 async def run_import() -> dict:
     """Timepad (if a token is set) plus the quiz organizers and poker clubs. One failing source does not stop the others."""
-    jobs = [("Квиз, плиз", quizplease.fetch()), ("Мозгва", mozgva.fetch()), ("ПокерСистема", pokersystem.fetch())]
+    jobs = [("Квиз, плиз", quizplease.fetch()), ("Мозгва", mozgva.fetch()), ("ПокерСистема", pokersystem.fetch()),
+            ("FindMafia", findmafia.fetch())]
     if settings.timepad_token:
         jobs.insert(0, ("Timepad", timepad.fetch(settings.timepad_token, settings.timepad_city,
                                                   settings.import_days_ahead)))

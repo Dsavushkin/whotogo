@@ -58,3 +58,19 @@ async def test_indexnow_key_file(client):
     from app import indexnow
     assert (await client.get(f"/{indexnow.KEY}.txt")).text == indexnow.KEY
     assert await indexnow.submit(["/afisha"]) == 0  # never pings from dev/tests
+
+
+MAFIA_PAGE = """<title>Мафия в Москве</title><ul class="event-list"><li class="top" itemscope itemtype="https://schema.org/Event" > <link itemprop="url" href="https://findmafia.ru/event/moskovskaya-mafiya/19928-gorodskaya-mafiya-novichki"> <meta itemprop="startDate" content="2026-11-27T18:50:00+03:00"> <meta itemprop="description" content="Игра"> <div class="info"> <span class = "org">Московская Мафия</span> <h2 class="title"><span itemprop="name">Городская Мафия (Новички)</span></h2> <p class="desc"><span itemprop="location" itemscope itemtype="https://schema.org/Place" class="info-text"> <span itemprop="name"><a class="location-href" href='https://findmafia.ru/location/x' target="_blank">Mos-lounge</a></span> <span itemprop="address" itemscope itemtype="https://schema.org/PostalAddress"> <meta itemprop="streetAddress" content="Комсомольский пр-кт, д 28 "> </span> </span> </p> <p itemprop="offers" itemscope itemtype="https://schema.org/Offer" class="desc"><meta itemprop="priceCurrency" content="RUB"> <meta itemprop="price" content="1200"> <span class="info-text"> 1200 руб./чел.</span></p></div></li>
+<li class="top" itemscope itemtype="https://schema.org/Event" > <link itemprop="url" href="https://findmafia.ru/event/x/19929-detskaya"> <meta itemprop="startDate" content="2026-11-28T12:00:00+03:00"><span class = "org">X</span><h2 class="title"><span itemprop="name">Детская мафия</span></h2></li></ul>"""
+
+
+def test_findmafia_schedule():
+    from app.sources import findmafia
+    events = findmafia.parse(MAFIA_PAGE, now=datetime(2026, 11, 27, 7, 0))
+    assert len(events) == 1
+    event = events[0]
+    assert event["title"] == "Городская Мафия (Новички) · Московская Мафия" and event["category"] == "mafia"
+    assert event["starts_at"] == datetime(2026, 11, 27, 15, 50) and event["source_id"] == "19928"
+    assert event["place"] == "Mos-lounge" and event["address"] == "Москва, Комсомольский пр-кт, д 28"
+    assert event["price"] == "1 200 ₽ с человека"
+    assert findmafia.parse(MAFIA_PAGE, now=datetime(2026, 11, 28, 7, 0)) == []
