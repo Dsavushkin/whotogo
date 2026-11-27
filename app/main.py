@@ -16,6 +16,7 @@ from .seo import router as seo_router
 from .indexnow import router as indexnow_router
 from .groups import router as groups_router
 from .gatherings import router as gatherings_router
+from .reputation import router as reputation_router
 from .social import pictures as social_pictures, router as social_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -62,6 +63,7 @@ app.include_router(seo_router)
 app.include_router(indexnow_router)
 app.include_router(groups_router)
 app.include_router(gatherings_router)
+app.include_router(reputation_router)
 app.include_router(social_router)
 app.include_router(social_pictures)
 

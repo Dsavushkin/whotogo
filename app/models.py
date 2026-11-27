@@ -39,6 +39,8 @@ class User(Base):
     invite_code: Mapped[str] = mapped_column(String(16), default="", index=True)
     # Wants to lead companies: meets the others at the entrance and introduces everyone.
     captain_ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Others may see which events this person has been to (on their profile).
+    show_history: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -195,4 +197,14 @@ class Achievement(Base):
     __tablename__ = "achievements"
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
     code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class PresenceVote(Base):
+    """After an event, people who planned to go together say whether the other one actually came."""
+    __tablename__ = "presence_votes"
+    voter_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    target_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True, index=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), primary_key=True)
+    came: Mapped[bool] = mapped_column(Boolean)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

@@ -52,6 +52,8 @@ const bg = (url, plain) => {
   return ` style="background-image:${plain ? '' : 'linear-gradient(rgba(14,14,18,.2),rgba(14,14,18,.78)),'}url('${esc(url)}')"`;
 };
 const who = (p) => esc(p.name) + (p.age ? ', ' + p.age : '');
+/** «Пришёл 5 из 5» — how often the person really came where they promised. */
+const trustBadge = (r) => (r && r.total ? `<span class="badge trust${r.reliable ? ' good' : r.came < r.total ? ' warn' : ''}">${r.reliable ? '✅ Надёжный · ' : ''}${esc(r.label)}</span>` : '');
 const lookingText = (n) => n + ' ' + plural(n, 'ищет компанию', 'ищут компанию', 'ищут компанию');
 const goingText = (n) => n + ' ' + plural(n, 'идёт', 'идут', 'идут');
 
@@ -226,8 +228,11 @@ screens.event = async (id) => {
   const e = await api('GET', '/events/' + id);
   state.event = e;
   const mine = e.my_status;
+  const here = e.checkin_open
+    ? (e.checked_in ? '<span class="badge lime">📍 Вы отметились на месте</span>' : `<button class="btn lime" data-here="${e.id}">📍 Я на месте</button>`)
+    : '';
   const footer = e.started
-    ? (mine ? `<button class="btn ink" data-go="after/${e.id}">С кем хочется увидеться ещё?</button>` : '')
+    ? (here && !e.checked_in ? here : mine ? `<button class="btn ink" data-go="after/${e.id}">Как прошло? Отметить спутников</button>` : '')
     : e.gathering
       ? (e.group ? `<button class="btn lime" data-go="group/${e.group.id}">Открыть чат сбора</button>`
         : e.waiting ? '' : `<button class="btn ink" data-company="${e.id}">${e.gathering.left ? 'Присоединиться' : 'Встать в очередь'}</button>`)
@@ -245,6 +250,7 @@ screens.event = async (id) => {
       </div>
       ${e.description ? `<p>${esc(e.description)}</p>` : ''}
       ${e.friends && e.friends.length ? `<div class="card friends-going"><span class="line"><span class="faces">${e.friends.slice(0, 4).map((p) => ava(p, 's')).join('')}</span><span class="small semi">👋 ${e.friends.length === 1 ? esc(e.friends[0].name) + ' тоже идёт' : 'Идут ваши друзья: ' + e.friends.map((p) => esc(p.name)).join(', ')}</span></span></div>` : ''}
+      ${!e.started && e.checkin_open ? here : e.started && e.checked_in ? here : ''}
       ${companyCard(e)}
       <button class="card" data-go="event/${e.id}/people">
         <span class="between"><h2 class="strong" style="font-size:17px">Кто идёт</h2><span class="looking">${e.going ? 'Все ' + e.going : ''}</span></span>
@@ -268,9 +274,9 @@ function personCard(p, eventId, eventLine) {
       : `<button class="btn blue small" data-invite="${p.id}" data-event="${eventId}">Пойдём вместе</button>`;
   return `<article class="card">
     ${eventLine || ''}
-    <div class="line" style="align-items:flex-start;gap:12px">${ava(p, 'l')}
-      <div class="col"><h2 class="strong" style="font-size:18px">${who(p)}</h2>${p.girls_only ? '<span class="badge girls">👭 только с девушками</span>' : ''}${(p.note || p.bio) ? `<p class="small">${esc(p.note || p.bio)}</p>` : ''}</div>
-    </div>
+    <button class="line" data-go="user/${p.id}" style="align-items:flex-start;gap:12px;text-align:left">${ava(p, 'l')}
+      <span class="col"><h2 class="strong" style="font-size:18px">${who(p)} <span class="small muted">›</span></h2>${trustBadge(p.reliability)}${p.girls_only ? '<span class="badge girls">👭 только с девушками</span>' : ''}${(p.note || p.bio) ? `<p class="small">${esc(p.note || p.bio)}</p>` : ''}</span>
+    </button>
     ${p.interests.length ? `<div class="tags">${p.interests.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
     ${button}
     <button class="btn text quiet" data-report="${p.id}">Пожаловаться</button>
@@ -319,13 +325,15 @@ screens.match = async (id) => {
 };
 
 screens.after = async (id) => {
-  const data = await api('GET', `/events/${id}/after`);
+  const [data, presence] = await Promise.all([api('GET', `/events/${id}/after`), api('GET', `/events/${id}/presence`).catch(() => ({ people: [] }))]);
+  const came = presence.people.map((p) => `<div class="rowline" style="cursor:default">${ava(p, 'm')}<span class="semi" style="flex:1">${esc(p.name)}</span>
+      <button class="chip small" data-came="${p.id}" data-event="${id}" data-yes="1" aria-pressed="${p.came === true}">${p.gender === 'f' ? 'Пришла' : 'Пришёл'}</button><button class="chip small" data-came="${p.id}" data-event="${id}" data-yes="0" aria-pressed="${p.came === false}">${p.gender === 'f' ? 'Не пришла' : 'Не пришёл'}</button></div>`).join('');
   const picked = data.guests.filter((g) => g.marked).length;
   return `<div class="screen">
     <header class="head" style="gap:10px"><div class="line" style="gap:12px">${backBtn()}<span class="badge ink clip">${when(data.event.starts_at, false)} · ${esc(data.event.title)}</span></div>
       <h1 class="display" style="font-size:26px">С кем хочется увидеться ещё?</h1>
       <p class="muted">Отметьте гостей вечера. Человек узнает об этом, только если отметит вас в ответ.</p></header>
-    <main class="body">${data.guests.length ? `<div class="guests">${data.guests.map((g) => `
+    <main class="body">${came ? `<section class="card"><h2 class="strong" style="font-size:17px">Кто из вашей компании пришёл?</h2><p class="small muted">Это видят другие в профиле человека: «пришёл 5 из 5». Помогает понять, на кого можно положиться.</p><div class="rows">${came}</div></section>` : ''}${data.guests.length ? `<div class="guests">${data.guests.map((g) => `
       <button class="guest" data-guest="${g.id}" aria-pressed="${g.marked}">${ava(g, 'l')}<span class="small strong clip" style="max-width:100%">${esc(g.name)}</span><span class="tick">${ICON.check}</span></button>`).join('')}</div>`
       : empty('Гостей пока нет', 'Отметки появятся, когда на событии отметится кто-то ещё.')}</main>
     ${data.guests.length ? `<footer class="foot"><p class="small semi muted" style="text-align:center" id="picked" data-total="${data.guests.length}">Выбрано: ${picked} из ${data.guests.length}</p>
@@ -362,8 +370,8 @@ screens.chat = async (id) => {
   const quick = c.messages.length ? '' : `<div class="chips" style="margin:0">${[...ice, 'Привет! Где встретимся?', 'У входа за 15 минут до начала'].map((t) => `<button class="chip small" data-quick="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
   return `<div class="screen" style="padding-top:0">
     <header class="chat-head">
-      <div class="line" style="gap:12px">${backBtn('soft')}${ava(c.other, 'm')}
-        <div class="col" style="gap:0;flex:1"><h1 class="strong" style="font-size:18px">${esc(c.other.name)}</h1><span class="small semi muted">${c.kind === 'again' ? 'взаимная отметка после вечера' : 'идёте вместе ' + when(c.event.starts_at, false).toLowerCase()}</span></div>
+      <div class="line" style="gap:12px">${backBtn('soft')}<button class="line" data-go="user/${c.other.id}" style="gap:12px;flex:1;text-align:left">${ava(c.other, 'm')}
+        <span class="col" style="gap:0;flex:1"><h1 class="strong" style="font-size:18px">${esc(c.other.name)} <span class="small muted">›</span></h1><span class="small semi muted">${c.kind === 'again' ? 'взаимная отметка после вечера' : 'идёте вместе ' + when(c.event.starts_at, false).toLowerCase()}</span></span></button>
         <button class="round soft" data-report="${c.other.id}" aria-label="Пожаловаться или скрыть">${ICON.more}</button></div>
       <button class="chat-event" data-go="event/${c.event.id}" style="text-align:left"><span class="small strong">${esc(c.event.title)}</span><span class="small semi muted">${when(c.event.starts_at)}${c.event.place ? ' · ' + esc(c.event.place) : ''}</span></button>
     </header>
@@ -515,7 +523,7 @@ screens.profile = async () => {
     <main class="body">
       <section class="card"><div class="line" style="gap:14px">${ava(me, 'l')}<div class="col" style="gap:2px"><h2 class="strong" style="font-size:20px">${who(me)}</h2>${me.bio ? `<p class="small">${esc(me.bio)}</p>` : ''}</div></div>
         ${me.interests.length ? `<div class="tags">${me.interests.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
-        <button class="btn soft small" data-go="profile/edit">Изменить</button></section>
+        <span class="row"><button class="btn soft small" data-go="profile/edit">Изменить</button><button class="btn white small" data-go="user/${me.id}">Как меня видят</button></span></section>
       <button class="card invite-card" data-invite-friends><span class="strong" style="font-size:18px">👋 Позвать друга</span><span class="small semi">Отправьте ссылку на «Кто идёт» — ходить вместе веселее. Друг появится у вас в друзьях, а вы получите достижение.</span></button>
       <section class="card"><span class="between"><h2 class="strong" style="font-size:17px">Достижения · ${got.length} из ${p.achievements.length}</h2><button class="btn text small" data-go="achievements" style="width:auto;padding:0">Все</button></span>
         <div class="ach-grid">${top.map(achTile).join('')}</div></section>
@@ -530,6 +538,33 @@ screens.profile = async () => {
       ${inTelegram ? '' : '<button class="btn text small" data-logout>Выйти</button>'}
       <button class="btn text small danger" data-delete>Удалить аккаунт</button>
     </main>${nav('profile')}</div>`;
+};
+
+screens.user = async (id) => {
+  const u = await api('GET', '/users/' + id);
+  const r = u.reliability;
+  const months = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  const since = u.since ? new Date(u.since) : null;
+  const tiles = u.achievements.map((a) => `<div class="ach got"><span class="ach-emoji">${a.emoji}</span><span class="tiny strong clip">${esc(a.title)}</span><span class="ach-stars">${'★'.repeat(a.level)}${'☆'.repeat(a.levels - a.level)}</span></div>`).join('');
+  const history = u.history.map((e) => `<button class="rowline" data-go="event/${e.id}"><span class="col" style="gap:0;flex:1;min-width:0"><span class="semi clip">${esc(e.title)}</span><span class="small semi muted">${when(e.starts_at, false)} · ${esc(e.category_name)}</span></span></button>`).join('');
+  return `<div class="screen"><header class="head"><div>${backBtn()}</div></header>
+    <main class="body">
+      <section class="card"><div class="line" style="gap:14px">${ava(u, 'l')}<div class="col" style="gap:4px"><h1 class="strong" style="font-size:22px">${who(u)}</h1>
+        <span class="small semi muted">${since ? 'В «Кто идёт» с ' + months[since.getMonth()] + ' ' + since.getFullYear() : ''}${u.friend ? ' · 👋 ваш друг' : ''}${u.captain ? ' · ⭐ капитан' : ''}</span></div></div>
+        ${u.bio ? `<p>${esc(u.bio)}</p>` : ''}
+        ${u.interests.length ? `<div class="tags">${u.interests.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}</section>
+      <section class="card trust-card${r.reliable ? ' good' : ''}"><span class="strong" style="font-size:17px">${r.total ? (r.reliable ? '✅ Надёжный' : '📍 Надёжность') : '📍 Надёжность'}</span>
+        <span class="semi">${r.total ? esc(r.label) + ' — там, где ' + (u.gender === 'f' ? 'договорилась' : 'договорился') + ' пойти с людьми' : (u.me ? 'Пока без отметок: вы ещё не ходили' : 'Пока без отметок: ещё не ' + (u.gender === 'f' ? 'ходила' : 'ходил')) + ' с компанией через «Кто идёт»'}</span>
+        <span class="small muted">Считаем по отметке «Я на месте», отметке организатора и тому, что сказали спутники после вечера.</span></section>
+      <div class="stats three">
+        <div class="stat"><b>${u.stats.events}</b><span>${plural(u.stats.events, 'событие', 'события', 'событий')}</span></div>
+        <div class="stat"><b>${u.stats.companies}</b><span>${plural(u.stats.companies, 'компания', 'компании', 'компаний')}</span></div>
+        <div class="stat"><b>${u.stats.genres}</b><span>${plural(u.stats.genres, 'жанр', 'жанра', 'жанров')}</span></div></div>
+      ${tiles ? `<section class="card"><h2 class="strong" style="font-size:17px">Достижения</h2><div class="ach-grid">${tiles}</div></section>` : ''}
+      <section class="card"><h2 class="strong" style="font-size:17px">Где ${u.me ? 'вы были' : u.gender === 'f' ? 'была' : 'был'}</h2>${history ? `<div class="rows">${history}</div>` : `<p class="small muted">${u.history_hidden && !u.me ? 'Человек скрыл историю посещений.' : 'Пока ни одного прошедшего события.'}</p>`}
+        ${u.me ? `<label class="check"><input type="checkbox" data-history ${state.me.show_history !== false ? 'checked' : ''}><span class="small">Показывать другим, где я был</span></label>` : ''}</section>
+      ${u.me ? '' : `<button class="btn text quiet" data-report="${u.id}">Пожаловаться или скрыть</button>`}
+    </main></div>`;
 };
 
 screens.org = async () => {
@@ -637,6 +672,7 @@ async function render() {
     else if (a === 'group') html = await screens.group(b);
     else if (a === 'achievements') html = await screens.achievements();
     else if (a === 'friends') html = await screens.friends();
+    else if (a === 'user') html = await screens.user(b);
     else if (a === 'profile') html = b === 'edit' ? await screens.profileEdit() : await screens.profile();
     else if (a === 'gather') html = await screens.gatherNew();
     else if (a === 'org') html = b === 'new' ? await screens.orgNew() : b ? await screens.orgEvent(b) : await screens.org();
@@ -759,7 +795,7 @@ document.addEventListener('click', async (event) => {
     if (!g) return;
     return sheet(`<h2 class="strong">Компания</h2>
       ${g.full ? '' : `<button class="btn ink" data-group-invite="${g.id}">Позвать друга в компанию</button>`}
-      ${g.others.map((p) => `<div class="between">${ava(p, 'm')}<span class="semi" style="flex:1;margin-left:12px">${who(p)}${g.captain_id === p.id ? ' ⭐' : ''}</span><button class="btn text small quiet" data-report="${p.id}">Пожаловаться</button></div>`).join('')}
+      ${g.others.map((p) => `<div class="between"><button class="line" data-go="user/${p.id}" style="flex:1;gap:12px;text-align:left">${ava(p, 'm')}<span class="semi">${who(p)}${g.captain_id === p.id ? ' ⭐' : ''} <span class="muted">›</span></span></button><button class="btn text small quiet" data-report="${p.id}">Пожаловаться</button></div>`).join('')}
       <button class="btn text danger" data-group-leave="${g.id}">Выйти из компании</button><button class="btn text" data-close>Закрыть</button>`);
   }
   if (d.groupLeave) {
@@ -849,6 +885,18 @@ document.addEventListener('click', async (event) => {
     history.replaceState(null, '', '#/chats');
     return render();
   }
+  if (d.here) {
+    if (await act(() => api('POST', `/events/${d.here}/checkin`))) { haptic(); toast('Отметили: вы на месте'); render(); }
+    return;
+  }
+  if (d.came) {
+    const yes = d.yes === '1';
+    const on = el.getAttribute('aria-pressed') !== 'true';
+    if (await act(() => api('POST', `/events/${d.event}/presence`, { votes: { [d.came]: on ? yes : null } }))) {
+      document.querySelectorAll(`[data-came="${d.came}"]`).forEach((b) => b.setAttribute('aria-pressed', String(on && (b.dataset.yes === '1') === yes)));
+    }
+    return;
+  }
   if (d.quick) return sendMessage(d.quick);
   if (d.report) return reportSheet(d.report);
   if (d.reportSend) {
@@ -877,6 +925,12 @@ document.addEventListener('change', async (event) => {
     const on = event.target.checked;
     const me = await act(() => api('PUT', '/me/settings', { captain_ok: on }));
     if (me) { state.me = me; toast(on ? 'Теперь вы можете стать капитаном компании' : 'Капитанство выключено'); } else event.target.checked = !on;
+    return;
+  }
+  if (event.target.matches('[data-history]')) {
+    const on = event.target.checked;
+    const me = await act(() => api('PUT', '/me/settings', { show_history: on }));
+    if (me) { state.me = me; toast(on ? 'История видна другим' : 'История скрыта'); } else event.target.checked = !on;
     return;
   }
   if (!event.target.matches('[data-nudges]')) return;

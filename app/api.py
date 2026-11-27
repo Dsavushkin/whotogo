@@ -244,7 +244,7 @@ class ProfileIn(BaseModel):
 def me_card(me: User) -> dict:
     return {**user_card(me), "name": me.name, "adult_ok": me.adult_ok, "is_organizer": me.is_organizer,
             "is_admin": settings.is_admin(me), "has_telegram": bool(me.tg_id), "nudges": me.nudges,
-            "captain_ok": me.captain_ok}
+            "captain_ok": me.captain_ok, "show_history": me.show_history}
 
 
 @router.get("/me")
@@ -272,6 +272,7 @@ async def put_me(body: ProfileIn, me: User = Depends(current_user), session: Asy
 class SettingsIn(BaseModel):
     nudges: Optional[bool] = None
     captain_ok: Optional[bool] = None
+    show_history: Optional[bool] = None
 
 
 @router.put("/me/settings")
@@ -279,6 +280,8 @@ async def put_settings(body: SettingsIn, me: User = Depends(current_user), sessi
     me = await session.merge(me)
     if body.nudges is not None:
         me.nudges = body.nudges
+    if body.show_history is not None:
+        me.show_history = body.show_history
     if body.captain_ok is not None:
         if body.captain_ok and not await progress.captain_ready(session, me):
             raise HTTPException(400, f"Капитаном можно стать после {progress.CAPTAIN_AFTER} событий")
@@ -301,6 +304,8 @@ async def delete_me(me: User = Depends(current_user), session: AsyncSession = De
     await session.execute(update(Group).where(Group.captain_id == me.id).values(captain_id=None))
     await session.execute(delete(Friend).where(or_(Friend.user_id == me.id, Friend.friend_id == me.id)))
     await session.execute(delete(Achievement).where(Achievement.user_id == me.id))
+    from .models import PresenceVote
+    await session.execute(delete(PresenceVote).where(or_(PresenceVote.voter_id == me.id, PresenceVote.target_id == me.id)))
     await session.execute(delete(Attendance).where(Attendance.user_id == me.id))
     await session.execute(delete(Block).where(or_(Block.user_id == me.id, Block.target_id == me.id)))
     await session.execute(delete(Report).where(Report.reporter_id == me.id))
@@ -334,6 +339,11 @@ async def list_events(day: str = "today", category: str = "", me: Optional[User]
     return {"events": cards, "categories": CATEGORIES, "gatherings": GATHERINGS}
 
 
+def checkin_state(event: Event, mark: Optional[Attendance]) -> dict:
+    from .reputation import checkin_state as state
+    return state(event, mark)
+
+
 @router.get("/events/{event_id}")
 async def event_detail(event_id: int, me: Optional[User] = Depends(maybe_user),
                        session: AsyncSession = Depends(get_session)):
@@ -346,6 +356,7 @@ async def event_detail(event_id: int, me: Optional[User] = Depends(maybe_user),
     return {**event_card(event, *counts[event.id]), "description": event.description, "url": event.url,
             "source": event.source, "my_status": mine.status if mine else None,
             "my_note": mine.note if mine else "", "my_girls_only": bool(mine and mine.girls_only),
+            **checkin_state(event, mine),
             **await group_status(session, me, event),
             "friends": [user_card(u) for u in (await friends_at(session, me, [event.id])).get(event.id, [])],
             "faces": [u.name[:1].upper() or "?" for u in rows.scalars()]}
@@ -425,9 +436,12 @@ async def people(event_id: int, girls: bool = False, me: User = Depends(current_
     for m in (await session.execute(select(Match).where(
             Match.event_id == event.id, or_(Match.a_id == me.id, Match.b_id == me.id)))).scalars():
         matched[m.b_id if m.a_id == me.id else m.a_id] = m.id
+    rows = [(u, note, only) for u, note, only in rows if u.id not in hidden]
+    from .reputation import reliability, reliability_card
+    trust = await reliability(session, [u.id for u, _, _ in rows])
     return {"event": event_card(event), "people": [
-        {**user_card(u), "note": note, "girls_only": only, "invited": u.id in invited, "match_id": matched.get(u.id)}
-        for u, note, only in rows if u.id not in hidden]}
+        {**user_card(u), "note": note, "girls_only": only, "invited": u.id in invited, "match_id": matched.get(u.id),
+         "reliability": reliability_card(trust[u.id], u.gender)} for u, note, only in rows]}
 
 
 @router.post("/events/{event_id}/invite/{user_id}")
@@ -470,9 +484,13 @@ async def people_feed(girls: bool = False, me: User = Depends(current_user),
     matched = {}
     for m in (await session.execute(select(Match).where(or_(Match.a_id == me.id, Match.b_id == me.id)))).scalars():
         matched[(m.b_id if m.a_id == me.id else m.a_id, m.event_id)] = m.id
+    rows = [row for row in rows if row[0].id not in hidden]
+    from .reputation import reliability, reliability_card
+    trust = await reliability(session, [u.id for u, *_ in rows])
     return {"people": [
         {**user_card(u), "note": note, "girls_only": only, "event": event_card(e), "invited": (u.id, e.id) in invited,
-         "match_id": matched.get((u.id, e.id))} for u, note, e, only in rows if u.id not in hidden]}
+         "match_id": matched.get((u.id, e.id)), "reliability": reliability_card(trust[u.id], u.gender)}
+        for u, note, e, only in rows]}
 
 
 @router.get("/my/events")

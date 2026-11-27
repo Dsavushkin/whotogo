@@ -25,7 +25,8 @@ async def init_db() -> None:
                     or (marks and "reminded" not in marks) or (columns and "source" not in columns)
                     or (columns and "gender" not in columns) or (marks and "girls_only" not in marks)
                     or (marks and "wants_group" not in marks) or (columns and "invite_code" not in columns)
-                    or (events and "group_deal" not in events)):
+                    or (events and "group_deal" not in events)
+                    or (columns and "show_history" not in columns)):
                 await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
         if engine.dialect.name == "postgresql":
@@ -49,6 +50,7 @@ async def init_db() -> None:
                 "ALTER TABLE events ADD COLUMN IF NOT EXISTS group_deal VARCHAR(120) NOT NULL DEFAULT ''",
                 "ALTER TABLE events ADD COLUMN IF NOT EXISTS group_promo VARCHAR(40) NOT NULL DEFAULT ''",
                 "ALTER TABLE groups ADD COLUMN IF NOT EXISTS captain_id INTEGER REFERENCES users(id)",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS show_history BOOLEAN NOT NULL DEFAULT TRUE",
                 # Quizzes became their own category («Квизы»): move the ones already in the afisha.
                 "UPDATE events SET category = 'quiz' WHERE category IN ('games', 'other') AND (title ILIKE '%квиз%'"
                 " OR title ILIKE '%quiz%' OR title ILIKE '%викторин%' OR title ILIKE '%своя игра%')",

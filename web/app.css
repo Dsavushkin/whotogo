@@ -177,3 +177,14 @@ textarea.input{resize:none;min-height:96px}
 .bar i{display:block;height:100%;background:var(--ink);border-radius:3px}
 .invite-chip{background:var(--sun);color:var(--ink);white-space:nowrap}
 .invite-card{background:var(--sun);gap:4px;text-align:left}
+.badge.trust{background:#E9ECF2;color:var(--ink);align-self:flex-start;margin:2px 0}
+.badge.trust.good{background:#DDF7C2;color:#215B00}
+.badge.trust.warn{background:#FFE7D6;color:#9A3B00}
+.badge.lime{align-self:flex-start}
+.trust-card{gap:6px}
+.trust-card.good{background:#EEFBDF}
+.stats.three{grid-template-columns:1fr 1fr 1fr}
+.stats.three .stat{background:var(--card,#fff);color:var(--ink)}
+.stats.three .stat b{font-size:24px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>.btn{width:auto;flex:1}

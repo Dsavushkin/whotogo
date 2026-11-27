@@ -240,7 +240,8 @@ def new_companion(other, event) -> str:
 
 def after_event(event) -> str:
     return (f"👋 Как прошло «{q(event.title)}»?\n"
-            "Отметьте, с кем хочется увидеться ещё. Человек узнает об этом, только если отметит вас в ответ.")
+            "Отметьте, кто из вашей компании пришёл, и с кем хочется увидеться ещё. "
+            "Человек узнает о «увидимся ещё», только если отметит вас в ответ.")
 
 
 def day_reminder(event, partners: list, looking: int, status: str) -> str:
