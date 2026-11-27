@@ -18,7 +18,7 @@ def item(**over):
 def test_tournament_to_event():
     event = pokersystem.to_event(item(), "acepokerclub", now=NOW)
     assert event["category"] == "poker" and event["source_id"] == "acepokerclub-225"
-    assert event["title"] == "OMAHA 4-CARD · Ace Poker Club"
+    assert event["title"] == "OMAHA 4-CARD · AcePokerClub" and event["place"] == "AcePokerClub"
     assert event["starts_at"] == datetime(2026, 11, 27, 13, 0)
     assert event["price"] == "500 ₽ за участие"
     assert event["address"] == "г. Москва, ул. Сергия Радонежского, д. 9, стр. 5"

@@ -15,12 +15,16 @@ NAME = "pokersystem"
 API = "https://{slug}.pokersystem.ru/php.php"
 SITE = "https://{slug}.pokersystem.ru/"
 # Moscow clubs from pokersystem.ru/clubs?city=Москва. Clubs outside Moscow are dropped by address anyway.
-CLUBS = (
-    "acepokerclub", "kingoftable", "offline", "aurum", "betpoker", "dist", "hroniki", "legacy-poker-club",
-    "pokerfaceclub", "river-rat", "troya", "pokerplaymsk", "a2poker", "pokerclub", "sparta", "afk", "pokermsc",
-    "lounge-yugo-zapad", "noble-club", "aces", "dopamine", "sova", "t-poker", "karta", "korol-na-stule",
-    "stav-tv", "ak-tt", "full-house-89", "fullhouse", "kartel",
-)
+CLUBS = {
+    "acepokerclub": "AcePokerClub", "kingoftable": "KingOfTable", "offline": "OFFLINE", "aurum": "Аурум",
+    "betpoker": "Betpoker", "dist": "Дистанция", "hroniki": "Хроники", "legacy-poker-club": "Legacy Poker Club",
+    "pokerfaceclub": "Poker Face Club", "river-rat": "River Rat", "troya": "Троя Покер Клаб",
+    "pokerplaymsk": "Poker Play", "a2poker": "A2 Poker Club", "pokerclub": "Покерный клуб №1", "sparta": "SPARTA",
+    "afk": "АФК", "pokermsc": "ПРАЙМ", "lounge-yugo-zapad": "Покер Lounge Юго-Запад", "noble-club": "Нобл клаб",
+    "aces": "Aces", "dopamine": "Dopamine", "sova": "SOVA", "t-poker": "T-poker", "karta": "Карта",
+    "korol-na-stule": "Король на стуле", "stav-tv": "СТАВ ТВ", "ak-tt": "AK TT", "full-house-89": "Full House 89",
+    "fullhouse": "FullHouse Club",
+}
 MOSCOW = re.compile(r"москв|зеленоград", re.I)
 DAYS_AHEAD = 21
 
@@ -64,9 +68,12 @@ def to_event(item: dict, slug: str, now: Optional[datetime] = None) -> Optional[
     taken = int(item.get("current_participants") or 0) + int(item.get("fake_participants") or 0)
     if seats and taken >= seats:
         return None
-    club = clean(item.get("location_title") or item.get("location_name")) or slug
+    club = CLUBS.get(slug) or clean(item.get("location_title")) or slug
+    hall = clean(item.get("location_title") or item.get("location_name"))
     about = clean(item.get("description"))
     lines = [about[:600]] if about else []
+    if hall and hall.lower() != club.lower():
+        lines.append(f"Зал: {hall}.")
     lines.append("Спортивный покер: играют на фишки, не на деньги. Можно прийти одному — здесь найдётся компания за стол.")
     if seats:
         lines.append(f"Мест: {seats}.")
@@ -89,7 +96,7 @@ async def club_events(client: httpx.AsyncClient, slug: str) -> list:
     return [event for event in (to_event(item, slug) for item in data.get("tournaments") or []) if event]
 
 
-async def fetch(client: Optional[httpx.AsyncClient] = None, clubs=CLUBS) -> list:
+async def fetch(client: Optional[httpx.AsyncClient] = None, clubs=tuple(CLUBS)) -> list:
     own = client is None
     client = client or httpx.AsyncClient(timeout=20, headers={"User-Agent": "KtoIdet/1.0 (+https://kompaniyana.ru)",
                                                                "Accept": "application/json"})
