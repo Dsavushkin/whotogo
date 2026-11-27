@@ -961,8 +961,8 @@ document.addEventListener('submit', async (event) => {
 // ---------- start ----------
 function deepLink() {
   const target = params.get('go') || (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || '';
-  // «Квизы» link for organizers and ads: t.me/<bot>?startapp=quiz or ?go=quiz — afisha of quizzes for the week.
-  if (target === 'quiz') { state.category = 'quiz'; state.day = 'week'; return ''; }
+  // Category links for organizers and ads: t.me/<bot>?startapp=poker or ?go=poker — that category for the week.
+  if (['quiz', 'poker', 'mafia', 'quest', 'sbory'].includes(target)) { state.category = target; state.day = 'week'; return ''; }
   const m = /^(chat|after|event|match|people|group)-(\d+)$/.exec(target);
   if (m) return m[1] === 'people' ? `event/${m[2]}/people` : `${m[1]}/${m[2]}`;
   const invited = /^fr_[a-z0-9]{4,16}(?:_g\d+)?_e(\d+)$/i.exec(target);
