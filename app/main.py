@@ -13,6 +13,7 @@ from .config import settings
 from .db import init_db
 from .notify import status
 from .seo import router as seo_router
+from .indexnow import router as indexnow_router
 from .groups import router as groups_router
 from .gatherings import router as gatherings_router
 from .social import pictures as social_pictures, router as social_router
@@ -58,6 +59,7 @@ app = FastAPI(title="Кто идёт", lifespan=lifespan, docs_url="/api/docs" i
               openapi_url="/api/openapi.json" if settings.dev else None)
 app.include_router(router)
 app.include_router(seo_router)
+app.include_router(indexnow_router)
 app.include_router(groups_router)
 app.include_router(gatherings_router)
 app.include_router(social_router)

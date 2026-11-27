@@ -57,7 +57,7 @@ async def people(client):
 async def add_event(hours=5, title="Винил-вечер", **kw):
     from datetime import timedelta
     async with Session() as session:
-        event = Event(title=title, starts_at=utcnow() + timedelta(hours=hours), place="Лофт", **kw)
+        event = Event(title=title, starts_at=utcnow() + timedelta(hours=hours), **{"place": "Лофт", **kw})
         session.add(event)
         await session.commit()
         return event.id

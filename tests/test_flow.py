@@ -225,9 +225,11 @@ async def test_import_adds_then_updates(client):
     async with httpx.AsyncClient(transport=httpx.MockTransport(page)) as http:
         items = await timepad.fetch("T", "Москва", 7, client=http)
     assert len(items) == 3  # same title on the same day is kept once
-    assert await save_events(items, "msk") == {"added": 3, "updated": 0, "seen": 3}
+    first = await save_events(items, "msk")
+    assert first.pop("new_pages") == ["/e/1-vecher-0", "/e/2-vecher-1", "/e/3-vecher-2"]
+    assert first == {"added": 3, "updated": 0, "seen": 3}
     items[0]["price"] = "Бесплатно"
-    assert await save_events(items, "msk") == {"added": 0, "updated": 1, "seen": 3}
+    assert await save_events(items, "msk") == {"added": 0, "updated": 1, "seen": 3, "new_pages": []}
 
 
 async def test_sign_in_with_code_from_bot(people, client):

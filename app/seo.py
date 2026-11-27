@@ -20,6 +20,7 @@ from .api import CATEGORIES, TZ, counts_for, day_bounds
 from .config import settings
 from .db import get_session
 from .models import Event, utcnow
+from .seo_texts import GUIDES
 
 router = APIRouter(include_in_schema=False)
 APP_STORE = "https://apps.apple.com/ru/app/id6837698613"
@@ -48,6 +49,9 @@ DAYS = {
     "vyhodnye": ("weekend", "Куда сходить в Москве на выходных", "на выходных"),
 }
 SECTION_OF = {key: slug for slug, (key, _, _) in SECTIONS.items()}
+# Sections where the venue matters to people («расписание турниров AcePokerClub»): each venue gets a page.
+VENUE_SECTIONS = ("poker", "kvizy", "mafiya")
+VENUE_DAYS = 30
 
 MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября",
           "ноября", "декабря"]
@@ -234,14 +238,43 @@ async def event_page(key: str, session: AsyncSession = Depends(get_session)):
                 noindex=past and event.starts_at < utcnow() - timedelta(days=30))
 
 
+def guide_html(slug: str) -> tuple[str, Optional[dict]]:
+    guide = GUIDES.get(slug)
+    if not guide:
+        return "", None
+    text = "".join(f"<p>{e(part)}</p>" for part in guide["text"])
+    faq = "".join(f"<details><summary>{e(q)}</summary><p>{e(a)}</p></details>" for q, a in guide["faq"])
+    schema = {"@type": "FAQPage", "mainEntity": [
+        {"@type": "Question", "name": q, "acceptedAnswer": {"@type": "Answer", "text": a}} for q, a in guide["faq"]]}
+    return (f'<section class="guide"><h2>{e(guide["title"])}</h2>{text}'
+            f'<h2>Частые вопросы</h2>{faq}</section>'), schema
+
+
+def venues_html(section: str, events: list) -> str:
+    names = {}
+    for event in events:
+        if event.place and slugify(event.place) not in names:
+            names[slugify(event.place)] = event.place
+    if len(names) < 2:
+        return ""
+    links = "".join(f'<a class="chip" href="/afisha/{section}/{key}">{e(name)}</a>'
+                    for key, name in sorted(names.items(), key=lambda x: x[1].lower()))
+    return f'<h2>Где играть</h2><div class="chips">{links}</div>'
+
+
 async def listing(session: AsyncSession, path: str, h1: str, title: str, description: str, intro: str,
-                  day: str = "week", category: str = "") -> HTMLResponse:
+                  day: str = "week", category: str = "", section: str = "", place: str = "",
+                  crumbs: str = "") -> HTMLResponse:
     start, end = day_bounds(day)
+    if place:
+        end = start + timedelta(days=VENUE_DAYS)
     query = select(Event).where(Event.published, Event.city == settings.city, Event.starts_at >= start,
                                 Event.starts_at < end)
     if category:
         query = query.where(Event.category == category)
     events = list((await session.execute(query.order_by(Event.starts_at).limit(300))).scalars())
+    if place:
+        events = [x for x in events if x.place and slugify(x.place) == place]
     counts = await counts_for(session, [x.id for x in events])
     if events:
         grid = '<div class="grid">' + "".join(card(x, counts[x.id][1]) for x in events) + "</div>"
@@ -251,9 +284,20 @@ async def listing(session: AsyncSession, path: str, h1: str, title: str, descrip
                     f'{e(text.capitalize())}</a>' for slug, (_, _, text) in DAYS.items())
     chips += "".join(f'<a class="chip{" on" if path == "/afisha/" + slug else ""}" href="/afisha/{slug}">'
                      f'{e(name)}</a>' for slug, (_, name, _) in SECTIONS.items())
-    body = (f'<h1>{e(h1)}</h1><p class="lead">{e(intro)}</p><div class="chips">{chips}</div>{grid}')
+    extra, faq = ("", None) if place else guide_html(section)
+    venues = venues_html(section, events) if section in VENUE_SECTIONS and not place else ""
+    body = (f'{crumbs}<h1>{e(h1)}</h1><p class="lead">{e(intro)}</p><div class="chips">{chips}</div>{grid}'
+            f'{venues}{extra}')
+    graph = []
+    if events:
+        graph.append({"@type": "ItemList", "name": h1, "itemListElement": [
+            {"@type": "ListItem", "position": i + 1, "url": site() + event_path(x), "name": x.title}
+            for i, x in enumerate(events[:50])]})
+    if faq:
+        graph.append(faq)
+    schema = {"@context": "https://schema.org", "@graph": graph} if graph else None
     return page(title, description, path, body, image=next((x.image for x in events if x.image), ""),
-                noindex=not events)
+                schema=schema, noindex=not events)
 
 
 @router.get("/afisha", response_class=HTMLResponse)
@@ -280,8 +324,31 @@ async def afisha_section(slug: str, session: AsyncSession = Depends(get_session)
             session, f"/afisha/{slug}", f"{h1} в Москве",
             f"{h1} в Москве на неделю — афиша | Кто идёт",
             f"{words.capitalize()} на ближайшую неделю. Смотрите, кто ещё идёт, и находите компанию.",
-            f"{words.capitalize()} на ближайшие семь дней.", category=key)
+            f"{words.capitalize()} на ближайшие семь дней.", category=key, section=slug)
     raise HTTPException(404)
+
+
+@router.get("/afisha/{slug}/{place}", response_class=HTMLResponse)
+async def afisha_venue(slug: str, place: str, session: AsyncSession = Depends(get_session)):
+    """One club or bar: «AcePokerClub — расписание турниров». Long-tail queries land here."""
+    if slug not in VENUE_SECTIONS or place != slugify(place):
+        raise HTTPException(404)
+    key, h1, words = SECTIONS[slug]
+    start, _ = day_bounds("week")
+    rows = await session.execute(select(Event.place).where(
+        Event.published, Event.category == key, Event.starts_at >= start, Event.place.is_not(None)).distinct())
+    name = next((x for x in rows.scalars() if x and slugify(x) == place), None)
+    if not name:
+        raise HTTPException(404)
+    what = {"poker": "турниров по покеру", "kvizy": "квизов", "mafiya": "игр в мафию"}[slug]
+    crumbs = (f'<p class="crumbs"><a href="/afisha">Афиша</a> → <a href="/afisha/{slug}">{e(h1)}</a> → '
+              f'{e(name)}</p>')
+    return await listing(
+        session, f"/afisha/{slug}/{place}", f"{name}: расписание {what}",
+        f"{name} — расписание {what} в Москве | Кто идёт",
+        f"Ближайшие игры {name} в Москве: даты, время, стоимость. Найдите компанию, чтобы пойти вместе.",
+        f"Ближайшие игры {name} на месяц. Отметьте «Ищу компанию», чтобы пойти не одному.",
+        category=key, section=slug, place=place, crumbs=crumbs)
 
 
 APP_CAMPAIGN = "https://apps.apple.com/app/apple-store/id6837698613?pt=127051032&mt=8&ct="
@@ -323,6 +390,12 @@ async def sitemap(session: AsyncSession = Depends(get_session)):
     today = datetime.now(TZ).date().isoformat()
     urls = [(base + "/", today, "daily"), (base + "/afisha", today, "daily")]
     urls += [(f"{base}/afisha/{slug}", today, "daily") for slug in [*DAYS, *SECTIONS]]
+    venue_keys = {SECTIONS[slug][0]: slug for slug in VENUE_SECTIONS}
+    places = await session.execute(select(Event.category, Event.place).where(
+        Event.published, Event.category.in_(list(venue_keys)), Event.starts_at >= utcnow(),
+        Event.place.is_not(None)).distinct())
+    venues = {f"{base}/afisha/{venue_keys[cat]}/{slugify(name)}" for cat, name in places if name}
+    urls += [(loc, today, "daily") for loc in sorted(venues)]
     rows = await session.execute(
         select(Event).where(Event.published, Event.starts_at >= utcnow() - timedelta(hours=3))
         .order_by(Event.starts_at).limit(5000))
