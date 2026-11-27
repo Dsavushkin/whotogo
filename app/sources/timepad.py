@@ -14,6 +14,8 @@ NAME = "timepad"
 # A quiz is told by the event title only: Timepad's category names like «Игры, квесты и квизы» also cover
 # mafia and board games.
 QUIZ_WORDS = ("квиз", "quiz", "мозгобойн", "что? где? когда", "своя игра", "викторин")
+POKER_WORDS = ("покер", "poker", "холдем", "hold'em", "holdem")
+QUEST_WORDS = ("квест-комнат", "эскейп", "escape room", "квест в реальност")
 CATEGORY_WORDS = [
     ("dating", ("знакомств", "свидани", "speed dating", "быстрые свидания")),
     ("games", ("игр", "квест", "мафи", "настол")),
@@ -38,8 +40,15 @@ def clean(text: Optional[str]) -> str:
 
 
 def pick_category(names: list, title: str) -> str:
-    if any(w in title.lower() for w in QUIZ_WORDS):
+    low = title.lower()
+    if any(w in low for w in QUIZ_WORDS):
         return "quiz"
+    if "мафи" in low:
+        return "mafia"
+    if any(w in low for w in POKER_WORDS):
+        return "poker"
+    if any(w in low for w in QUEST_WORDS):
+        return "quest"
     hay = " ".join(names + [title]).lower()
     for slug, words in CATEGORY_WORDS:
         if any(w in hay for w in words):

@@ -23,7 +23,8 @@ router = APIRouter(prefix="/api")
 TZ = ZoneInfo(settings.timezone)
 
 CATEGORIES = {
-    "quiz": "Квизы", "music": "Музыка", "party": "Вечеринки", "food": "Еда", "games": "Игры", "art": "Искусство",
+    "quiz": "Квизы", "poker": "Покер", "mafia": "Мафия", "music": "Музыка", "party": "Вечеринки", "food": "Еда",
+    "games": "Игры", "quest": "Квесты", "art": "Искусство",
     "theater": "Театр", "cinema": "Кино", "talk": "Лекции", "sport": "Спорт", "walk": "Прогулки", "dating": "Знакомства",
     "other": "Другое",
 }
@@ -31,9 +32,13 @@ CATEGORIES = {
 
 # ---------- helpers ----------
 
+# The afisha filter «Сборы»: gatherings people created themselves («Свой сбор»), of any category.
+GATHERINGS = "sbory"
+
+
 def category_keys(category: str) -> tuple:
-    """«Игры» in iPhone 1.1 and older links also shows quizzes, which became their own category."""
-    return ("games", "quiz") if category == "games" else (category,)
+    """«Игры» in iPhone 1.1 and older links also shows the game categories split off later."""
+    return ("games", "quiz", "poker", "mafia", "quest") if category == "games" else (category,)
 
 
 def to_local_iso(dt: Optional[datetime]) -> Optional[str]:
@@ -88,6 +93,7 @@ def event_card(e: Event, going: int = 0, looking: int = 0) -> dict:
         "address": e.address, "price": e.price, "image": e.image or "", "going": going, "looking": looking,
         "group_deal": e.group_deal or "",
         "started": e.starts_at <= utcnow(),
+        "gathering": e.source == "user",  # «Свой сбор» of a participant
     }
 
 
@@ -315,7 +321,9 @@ async def list_events(day: str = "today", category: str = "", me: Optional[User]
     city = me.city if me else settings.city
     query = select(Event).where(Event.published, Event.city == city, Event.starts_at >= start,
                                 Event.starts_at < end)
-    if category:
+    if category == GATHERINGS:
+        query = query.where(Event.source == "user")
+    elif category:
         query = query.where(Event.category.in_(category_keys(category)))
     events = list((await session.execute(query.order_by(Event.starts_at).limit(200))).scalars())
     counts = await counts_for(session, [e.id for e in events])
@@ -323,7 +331,7 @@ async def list_events(day: str = "today", category: str = "", me: Optional[User]
     cards = [{**event_card(e, *counts.get(e.id, (0, 0))), "friends": len(friends.get(e.id, []))} for e in events]
     # Events where people already look for company go first, then by time.
     cards.sort(key=lambda c: (-c["looking"], c["starts_at"]))
-    return {"events": cards, "categories": CATEGORIES}
+    return {"events": cards, "categories": CATEGORIES, "gatherings": GATHERINGS}
 
 
 @router.get("/events/{event_id}")

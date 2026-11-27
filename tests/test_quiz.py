@@ -9,7 +9,7 @@ def test_quiz_category_from_title():
 
 
 def test_old_games_filter_keeps_quizzes():
-    assert category_keys("games") == ("games", "quiz")
+    assert set(category_keys("games")) == {"games", "quiz", "poker", "mafia", "quest"}
     assert category_keys("quiz") == ("quiz",)
 
 
@@ -67,5 +67,6 @@ def test_quizplease_game():
 
 
 def test_timepad_quiz_category_name_is_not_enough():
-    assert pick_category(["Игры, квесты и квизы"], "Спортивная мафия в клубе") == "games"
+    assert pick_category(["Игры, квесты и квизы"], "Спортивная мафия в клубе") == "mafia"
+    assert pick_category(["Игры"], "Турнир по покеру без денег") == "poker"
     assert pick_category(["Игры, квесты и квизы"], "Вечер настолок") == "games"

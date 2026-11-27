@@ -23,6 +23,14 @@ from .notify import notifier
 router = APIRouter(prefix="/api")
 
 SMALLEST, LARGEST = 3, 5
+GATHERING_MAX = 10  # «Свой сбор»: the host plus up to nine people
+
+
+def group_limit(event: Event) -> int:
+    """How many people one company of this event takes. A gathering is one company of the size its host chose."""
+    if event.source == "user":
+        return max(2, min(event.capacity or LARGEST, GATHERING_MAX))
+    return LARGEST
 PAIR_IS_ENOUGH = timedelta(hours=4)  # close to the start two waiting people get a chat too
 
 
@@ -70,6 +78,7 @@ async def assemble(session: AsyncSession, event: Event, now: Optional[datetime] 
                User.is_banned.is_(False)).order_by(Attendance.created_at))).all() if u.id not in placed]
     if not waiting:
         return 0
+    largest = group_limit(event)
     blocked = await blocks_among(session, placed | {u.id for _, u in waiting})
     clash = lambda user_id, ids: any((user_id, other) in blocked for other in ids)
     joined: list[tuple[Group, User]] = []
@@ -78,7 +87,7 @@ async def assemble(session: AsyncSession, event: Event, now: Optional[datetime] 
     # 1. Room in a group that already exists — the smallest one first.
     rest = []
     for attendance, user in waiting:
-        options = [g for g in groups if len(members[g.id]) < LARGEST and fits(user, attendance.girls_only, g.girls_only)
+        options = [g for g in groups if len(members[g.id]) < largest and fits(user, attendance.girls_only, g.girls_only)
                    and not clash(user.id, members[g.id])]
         if options:
             group = min(options, key=lambda g: len(members[g.id]))
@@ -90,7 +99,8 @@ async def assemble(session: AsyncSession, event: Event, now: Optional[datetime] 
 
     # 2. New groups from those still waiting, separately for «только с девушками».
     users = {u.id: u for _, u in rest}
-    for girls in (True, False):
+    # A gathering stays one company: the host's. Whoever doesn't fit waits for a free place.
+    for girls in (() if event.source == "user" else (True, False)):
         pool = [u.id for a, u in rest if a.girls_only == girls]
         enough = SMALLEST if event.starts_at - now > PAIR_IS_ENOUGH else 2
         if len(pool) < enough:
@@ -173,6 +183,8 @@ async def group_status(session: AsyncSession, me: User, event: Event) -> dict:
     group = await my_group(session, me.id, event.id) if me else None
     hidden = await blocked_ids(session, me) if me else set()
     info: dict = {"group": None, "waiting": False, "waiting_count": 0}
+    if event.source == "user":
+        info["gathering"] = await gathering_info(session, event, me)
     if group:
         people = [u for u in await members_of(session, group.id) if u.id != me.id and u.id not in hidden]
         info["group"] = {"id": group.id, "size": len(people) + 1, "others": [user_card(u) for u in people],
@@ -186,6 +198,18 @@ async def group_status(session: AsyncSession, me: User, event: Event) -> dict:
         mine = await session.get(Attendance, (me.id, event.id))
         info["waiting"] = bool(mine and mine.wants_group and mine.status == "looking")
     return info
+
+
+async def gathering_info(session: AsyncSession, event: Event, me: Optional[User]) -> dict:
+    """«Свой сбор»: who gathers and how many places are left in the company."""
+    host = await session.get(User, event.organizer_id) if event.organizer_id else None
+    group = (await session.execute(select(Group).where(Group.event_id == event.id)
+                                   .order_by(Group.created_at))).scalars().first()
+    size = await session.scalar(select(func.count()).select_from(GroupMember)
+                                .where(GroupMember.group_id == group.id)) if group else 0
+    limit = group_limit(event)
+    return {"host": user_card(host) if host else None, "mine": bool(me and host and me.id == host.id),
+            "size": size or 0, "limit": limit, "left": max(0, limit - (size or 0))}
 
 
 async def leave_group(session: AsyncSession, user_id: int, event_id: int) -> None:
@@ -240,7 +264,7 @@ async def group_chat(group_id: int, after: int = 0, me: User = Depends(current_u
                                   .order_by(GroupMessage.id).limit(300))).scalars()
     return {"id": group.id, "event": event_card(event), "girls_only": group.girls_only,
             "captain_id": group.captain_id if group.captain_id in names else None,
-            "deal": event.group_deal, "promo": event.group_promo, "full": len(people) >= LARGEST,
+            "deal": event.group_deal, "promo": event.group_promo, "full": len(people) >= group_limit(event),
             "others": [user_card(u) for u in people if u.id != me.id],
             "icebreaker": texts.icebreaker_plain(event, group.id, group=True),
             "messages": [{"id": m.id, "mine": m.sender_id == me.id, "from": names.get(m.sender_id, "Гость"),

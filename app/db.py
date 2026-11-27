@@ -52,6 +52,9 @@ async def init_db() -> None:
                 # Quizzes became their own category («Квизы»): move the ones already in the afisha.
                 "UPDATE events SET category = 'quiz' WHERE category IN ('games', 'other') AND (title ILIKE '%квиз%'"
                 " OR title ILIKE '%quiz%' OR title ILIKE '%викторин%' OR title ILIKE '%своя игра%')",
+                "UPDATE events SET category = 'mafia' WHERE category IN ('games', 'other', 'party') AND title ILIKE '%мафи%'",
+                "UPDATE events SET category = 'poker' WHERE category IN ('games', 'other', 'party')"
+                " AND (title ILIKE '%покер%' OR title ILIKE '%холдем%' OR title ILIKE '%poker%')",
             ):
                 await conn.exec_driver_sql(statement)
 

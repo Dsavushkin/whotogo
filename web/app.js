@@ -111,9 +111,10 @@ const empty = (title, text, action) => `<div class="empty"><h2 class="strong">${
 const screens = {};
 
 /** Small marks on an afisha card: friends who go and the group-ticket offer. */
-const extras = (e) => (e.friends || e.group_deal ? `<span class="marks">${e.friends ? `<span class="mark friends">👋 ${e.friends} ${plural(e.friends, 'друг', 'друга', 'друзей')}</span>` : ''}${e.group_deal ? `<span class="mark deal">🎟 ${esc(e.group_deal)}</span>` : ''}</span>` : '');
+const extras = (e) => (e.friends || e.group_deal || e.gathering ? `<span class="marks">${e.gathering ? '<span class="mark gather">👋 Сбор участника</span>' : ''}${e.friends ? `<span class="mark friends">👋 ${e.friends} ${plural(e.friends, 'друг', 'друга', 'друзей')}</span>` : ''}${e.group_deal ? `<span class="mark deal">🎟 ${esc(e.group_deal)}</span>` : ''}</span>` : '');
 
 const localDay = () => new Date().toDateString();
+const CAT_ICON = { quiz: '🧠', poker: '♠️', mafia: '🎭', quest: '🗝' };
 screens.afisha = async () => {
   // Late evening nothing is left today: open tomorrow and hide «Сегодня» until the date changes.
   if (state.noToday && state.noToday !== localDay()) state.noToday = '';
@@ -161,13 +162,28 @@ screens.afisha = async () => {
         ${state.me ? '<button class="chip small invite-chip" data-invite-friends>👋 Позвать друга</button>' : '<button class="chip" data-go="auth" style="background:var(--ink);color:#fff">Войти</button>'}</div>
       ${state.me ? '' : '<p class="note">Афиша Москвы и компания на вечер. Отметьте «Ищу компанию» на событии и посмотрите, кто ещё идёт.</p>'}
       <div class="chips">${state.noToday ? '' : dayChip('today', 'Сегодня')}${dayChip('tomorrow', 'Завтра')}${dayChip('weekend', 'Выходные')}${dayChip('week', 'Неделя')}</div>
-      <div class="chips">${catChip('', 'Всё')}${Object.entries(data.categories).filter(([id]) => id !== 'other').map(([id, label]) => catChip(id, id === 'quiz' ? '🧠 ' + label : label)).join('')}</div>
+      <div class="chips">${catChip('', 'Всё')}${catChip(data.gatherings || 'sbory', '👋 Сборы')}${Object.entries(data.categories).filter(([id]) => id !== 'other').map(([id, label]) => catChip(id, (CAT_ICON[id] ? CAT_ICON[id] + ' ' : '') + label)).join('')}</div>
+      <button class="btn white small gather-btn" data-go="${state.me ? 'gather' : 'auth'}">＋ Свой сбор: квест, падел, покер…</button>
     </header>
-    <main class="body">${cards || empty('Пока пусто', 'На эти даты событий нет. Посмотрите другие дни.', '<button class="btn ink small" data-day="week">Вся неделя</button>')}</main>
+    <main class="body">${cards || (state.category === 'sbory'
+      ? empty('Сборов пока нет', 'Соберите компанию сами: квест, падел, волейбол, покер — всё, куда не пойдёшь один.', `<button class="btn ink small" data-go="${state.me ? 'gather' : 'auth'}">＋ Свой сбор</button>`)
+      : empty('Пока пусто', 'На эти даты событий нет. Посмотрите другие дни.', '<button class="btn ink small" data-day="week">Вся неделя</button>'))}</main>
     ${nav('')}</div>`;
 };
 
+function gatheringCard(e) {
+  const g = e.gathering;
+  const host = g.host ? `<span class="line">${ava(g.host, 's')}<span class="small semi">Собирает ${esc(g.host.name)}${g.host.age ? ', ' + g.host.age : ''}</span></span>` : '';
+  const places = g.left ? `Свободно ${g.left} ${plural(g.left, 'место', 'места', 'мест')} из ${g.limit - 1}` : 'Мест пока нет — можно встать в очередь';
+  return `<div class="card company gather">
+    <span class="kicker">👋 Свой сбор</span>
+    ${host}
+    <span class="small semi">${places}. Присоединитесь — откроется общий чат с организатором сбора.</span>
+    ${e.waiting ? '<span class="looking">Вы в очереди — сообщим, если место освободится</span>' : `<button class="btn ink small" data-company="${e.id}">${g.left ? 'Присоединиться' : 'Встать в очередь'}</button>`}</div>`;
+}
+
 function companyCard(e) {
+  if (e.gathering && !e.group) return gatheringCard(e);
   const quiz = e.category === 'quiz';
   const what = quiz ? 'команду' : 'компанию';
   const faces = (list) => `<span class="faces">${list.slice(0, 4).map((p) => ava(p, 's')).join('')}</span>`;
@@ -212,6 +228,9 @@ screens.event = async (id) => {
   const mine = e.my_status;
   const footer = e.started
     ? (mine ? `<button class="btn ink" data-go="after/${e.id}">С кем хочется увидеться ещё?</button>` : '')
+    : e.gathering
+      ? (e.group ? `<button class="btn lime" data-go="group/${e.group.id}">Открыть чат сбора</button>`
+        : e.waiting ? '' : `<button class="btn ink" data-company="${e.id}">${e.gathering.left ? 'Присоединиться' : 'Встать в очередь'}</button>`)
     : `<button class="btn ${mine === 'going' ? 'lime' : 'soft'}" data-attend="${mine === 'going' ? 'none' : 'going'}">${mine === 'going' ? ICON.check + ' Иду' : 'Иду'}</button>
        <button class="btn ${mine === 'looking' ? 'lime' : 'ink'}" data-looking>${mine === 'looking' ? ICON.check + ' Ищу компанию' : 'Ищу компанию'}</button>`;
   return `<div class="screen" style="padding-top:0">
@@ -222,7 +241,7 @@ screens.event = async (id) => {
     <main class="body" style="padding-top:16px">
       <div class="facts">
         <div class="fact"><span class="tiny strong muted">Где</span><span class="semi">${esc(e.place || 'Уточняется')}</span>${e.address ? `<span class="small muted">${esc(e.address)}</span>` : ''}</div>
-        <div class="fact"><span class="tiny strong muted">Билет</span><span class="semi">${esc(e.price || 'На сайте события')}</span></div>
+        <div class="fact"><span class="tiny strong muted">${e.gathering ? 'Стоимость' : 'Билет'}</span><span class="semi">${esc(e.price || (e.gathering ? 'Договоритесь в чате' : 'На сайте события'))}</span></div>
       </div>
       ${e.description ? `<p>${esc(e.description)}</p>` : ''}
       ${e.friends && e.friends.length ? `<div class="card friends-going"><span class="line"><span class="faces">${e.friends.slice(0, 4).map((p) => ava(p, 's')).join('')}</span><span class="small semi">👋 ${e.friends.length === 1 ? esc(e.friends[0].name) + ' тоже идёт' : 'Идут ваши друзья: ' + e.friends.map((p) => esc(p.name)).join(', ')}</span></span></div>` : ''}
@@ -235,6 +254,8 @@ screens.event = async (id) => {
       ${e.started ? '' : '<button class="btn white small" data-share>Позвать друга</button>'}
       ${e.url ? `<button class="btn white small" data-link="${esc(e.url)}">Билеты и подробности</button>` : ''}
       ${e.source === 'timepad' ? '<p class="tiny muted">Источник: Timepad</p>' : ''}
+      ${e.gathering ? '<p class="tiny muted">Сбор создал участник «Кто идёт». Встречайтесь в людных местах и не переводите деньги незнакомым заранее.</p>' : ''}
+      ${e.gathering && e.gathering.mine && !e.started ? `<button class="btn text small danger" data-gather-cancel="${e.id}">Отменить сбор</button>` : ''}
     </main>
     ${footer ? `<footer class="foot row">${footer}</footer>` : ''}</div>`;
 };
@@ -520,6 +541,27 @@ screens.org = async () => {
     <footer class="foot"><button class="btn blue" data-go="org/new">Новое событие</button></footer></div>`;
 };
 
+screens.gatherNew = async () => {
+  const cats = (await api('GET', '/events?day=today')).categories;
+  const order = ['quest', 'sport', 'poker', 'mafia', 'games', 'quiz', 'food', 'music', 'party', 'walk', 'art', 'cinema', 'theater', 'talk', 'other'];
+  const options = order.filter((id) => cats[id]).map((id) => `<option value="${id}"${id === 'quest' ? ' selected' : ''}>${(CAT_ICON[id] ? CAT_ICON[id] + ' ' : '') + cats[id]}</option>`).join('');
+  return `<div class="screen"><header class="head"><div>${backBtn()}</div><span class="kicker">👋 Свой сбор</span><h1 class="display" style="font-size:26px">Соберите компанию</h1>
+      <p class="note">Квест на пятерых, падел два на два, волейбол, покер, поход в кино — всё, куда не хочется идти одному. Сбор появится в афише, откликнувшиеся попадут к вам в общий чат.</p></header>
+    <form class="body" id="gather" novalidate>
+      <label class="field"><span>Что делаем</span><input class="input" name="title" required maxlength="100" placeholder="Квест «Тайна маяка» на Покровке"></label>
+      <label class="field"><span>Тип</span><select class="input" name="category">${options}</select></label>
+      <label class="field"><span>Когда</span><input class="input" name="starts_at" type="datetime-local" required></label>
+      <label class="field"><span>Где</span><input class="input" name="place" required maxlength="120" placeholder="Название места"></label>
+      <label class="field"><span>Адрес</span><input class="input" name="address" maxlength="200" placeholder="Улица, дом, метро"></label>
+      <label class="field"><span>Сколько человек ищете</span><input class="input" name="need" type="number" inputmode="numeric" min="1" max="9" value="3" required></label>
+      <label class="field"><span>Стоимость</span><input class="input" name="price" maxlength="60" placeholder="≈1 500 ₽ с человека, делим поровну"></label>
+      <label class="field"><span>Пара слов</span><textarea class="input" name="description" maxlength="800" placeholder="Уровень, что взять с собой, где встречаемся"></textarea></label>
+      <p class="error" id="error" role="alert" hidden></p>
+      <button class="btn ink">Опубликовать сбор</button>
+      <p class="tiny muted">Сбор увидят все в афише. Нельзя: реклама, продажа, азартные игры на деньги.</p>
+    </form></div>`;
+};
+
 screens.orgNew = async () => {
   const cats = (await api('GET', '/events?day=today')).categories;
   return `<div class="screen dark"><header class="head"><div>${backBtn('ghost')}</div><h1 class="display" style="font-size:24px">Новое событие</h1></header>
@@ -596,6 +638,7 @@ async function render() {
     else if (a === 'achievements') html = await screens.achievements();
     else if (a === 'friends') html = await screens.friends();
     else if (a === 'profile') html = b === 'edit' ? await screens.profileEdit() : await screens.profile();
+    else if (a === 'gather') html = await screens.gatherNew();
     else if (a === 'org') html = b === 'new' ? await screens.orgNew() : b ? await screens.orgEvent(b) : await screens.org();
     else html = await screens.afisha();
   } catch (e) {
@@ -634,7 +677,7 @@ async function joinCompany(e, girlsOnly) {
   if (!res) return;
   haptic();
   if (res.group) return go('group/' + res.group.id);
-  toast('Собираем компанию — пришлём уведомление');
+  toast(e.gathering ? 'Мест пока нет — сообщим, если освободится' : 'Собираем компанию — пришлём уведомление');
   render();
 }
 
@@ -688,6 +731,7 @@ document.addEventListener('click', async (event) => {
   if (d.company) {
     if (!state.me) { state.returnTo = route().join('/'); return go('auth'); }
     const e = state.event;
+    if (e.gathering) return joinCompany(e, false);
     if (isGirl()) {
       const what = e.category === 'quiz' ? 'команду' : 'компанию';
       return sheet(`<h2 class="strong">Соберём ${what}</h2><p class="muted">Найдём 2–4 человек, которые тоже идут, и откроем общий чат.</p>
@@ -695,6 +739,15 @@ document.addEventListener('click', async (event) => {
         <button class="btn ink" data-company-go="${e.id}">Соберите мне ${what}</button><button class="btn text" data-close>Отмена</button>`);
     }
     return joinCompany(e, false);
+  }
+  if (d.gatherCancel) {
+    return sheet(`<h2 class="strong">Отменить сбор?</h2><p class="muted">Сбор пропадёт из афиши, участникам придёт сообщение.</p>
+      <button class="btn ink" data-gather-cancel-go="${d.gatherCancel}">Отменить сбор</button><button class="btn text" data-close>Не отменять</button>`);
+  }
+  if (d.gatherCancelGo) {
+    closeSheet();
+    if (await act(() => api('POST', `/gatherings/${d.gatherCancelGo}/cancel`))) { toast('Сбор отменён'); return go(''); }
+    return;
   }
   if (d.companyGo) { const only = document.getElementById('company-girls'); closeSheet(); return joinCompany(state.event, !!(only && only.checked)); }
   if (d.companyStop) {
@@ -875,6 +928,20 @@ document.addEventListener('submit', async (event) => {
     if (first) return render();
     toast('Сохранено');
     return back();
+  }
+  if (form.id === 'gather') {
+    const body = Object.fromEntries([...f.entries()].map(([k, v]) => [k, String(v).trim()]));
+    if (body.title.length < 3) return formError('Напишите, что делаем.');
+    if (!body.starts_at) return formError('Укажите дату и время.');
+    if (body.place.length < 2) return formError('Укажите место.');
+    body.need = Number(body.need);
+    if (!body.need || body.need < 1 || body.need > 9) return formError('Ищите от 1 до 9 человек.');
+    try {
+      const created = await api('POST', '/gatherings', body);
+      history.replaceState(null, '', '#/event/' + created.id);
+      toast('Сбор в афише');
+      return render();
+    } catch (e) { return formError(e.message); }
   }
   if (form.id === 'event') {
     const body = Object.fromEntries([...f.entries()].map(([k, v]) => [k, String(v).trim()]));

@@ -162,6 +162,9 @@ textarea.input{resize:none;min-height:96px}
 .mark{display:inline-block;font-size:12px;font-weight:800;padding:4px 9px;border-radius:10px;align-self:flex-start}
 .mark.friends{background:var(--sun);color:var(--ink)}
 .mark.deal{background:var(--lime);color:var(--ink)}
+.mark.gather{background:#E7E1FF;color:#3B2A8C}
+.company.gather{border-color:#6C5CE7}
+.gather-btn{margin-top:10px;border:2px dashed var(--ink)}
 .friends-going{background:var(--sun)}
 .deal-box{background:var(--lime);color:var(--ink);border-radius:16px;padding:10px 14px;max-width:300px;display:flex;flex-direction:column;gap:8px;align-items:center;font-size:13px}
 .deal-box .chip{background:var(--ink);color:#fff}
